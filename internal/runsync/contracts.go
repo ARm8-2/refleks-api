@@ -21,6 +21,7 @@ type Repository interface {
 	ExistingHashes(ctx context.Context, hashes []string) (map[string]struct{}, error)
 	InsertRun(ctx context.Context, meta RunMetadata) (bool, error)
 	RunByHash(ctx context.Context, hash string) (StoredRun, error)
+	ListRuns(ctx context.Context, req RunListRequest) ([]RunListItem, error)
 }
 
 // StoredRun is the persisted lookup shape used for download operations.

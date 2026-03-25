@@ -14,6 +14,11 @@ import (
 
 var sha256HexRe = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
+const (
+	defaultRunsListLimit = 50
+	maxRunsListLimit     = 200
+)
+
 // Service orchestrates metadata persistence and blob storage for run sync.
 type Service struct {
 	repo      Repository
@@ -63,6 +68,7 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 	if err != nil {
 		return SyncResult{}, err
 	}
+	parsedFileName := ensureRunFileExtension(parsed.FileName)
 
 	hash := sha256Hex(raw)
 	existing, err := s.repo.ExistingHashes(ctx, []string{hash})
@@ -74,7 +80,7 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 			Hash:           hash,
 			AlreadyPresent: true,
 			Stored:         false,
-			FileName:       parsed.FileName,
+			FileName:       parsedFileName,
 			EpochMilli:     parsed.EpochMilli,
 			SizeBytes:      int64(len(raw)),
 		}, nil
@@ -88,7 +94,7 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 
 	meta := RunMetadata{
 		Hash:          hash,
-		FileName:      parsed.FileName,
+		FileName:      parsedFileName,
 		ScenarioName:  strings.TrimSpace(parsed.ScenarioName),
 		SteamID:       strings.TrimSpace(parsed.SteamID),
 		SteamUsername: strings.TrimSpace(parsed.SteamUsername),
@@ -121,7 +127,7 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 			Hash:           hash,
 			AlreadyPresent: true,
 			Stored:         false,
-			FileName:       parsed.FileName,
+			FileName:       parsedFileName,
 			EpochMilli:     parsed.EpochMilli,
 			SizeBytes:      int64(len(raw)),
 		}, nil
@@ -131,7 +137,7 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		Hash:           hash,
 		AlreadyPresent: false,
 		Stored:         true,
-		FileName:       parsed.FileName,
+		FileName:       parsedFileName,
 		EpochMilli:     parsed.EpochMilli,
 		SizeBytes:      int64(len(raw)),
 	}, nil
@@ -180,8 +186,9 @@ func (s *Service) DownloadRaw(ctx context.Context, hash string) (RawDownload, er
 
 	fileName := strings.TrimSpace(run.FileName)
 	if fileName == "" {
-		fileName = normalized + ".refleks"
+		fileName = normalized + RunFileExtension
 	}
+	fileName = ensureRunFileExtension(fileName)
 
 	return RawDownload{
 		Hash:        normalized,
@@ -206,8 +213,9 @@ func (s *Service) DownloadRawURL(ctx context.Context, hash string) (RawDownloadL
 
 	fileName := strings.TrimSpace(run.FileName)
 	if fileName == "" {
-		fileName = normalized + ".refleks"
+		fileName = normalized + RunFileExtension
 	}
+	fileName = ensureRunFileExtension(fileName)
 
 	downloadURL, err := s.store.GetDownloadURL(ctx, run.ObjectKey, fileName)
 	if err != nil {
@@ -221,6 +229,37 @@ func (s *Service) DownloadRawURL(ctx context.Context, hash string) (RawDownloadL
 		Access:    downloadURL.Access,
 		ExpiresAt: downloadURL.ExpiresAt,
 	}, nil
+}
+
+// ListRuns returns filtered, sorted, paginated run metadata for frontend browsing.
+func (s *Service) ListRuns(ctx context.Context, req RunListRequest) (RunListResponse, error) {
+	query := normalizeRunListRequest(req)
+	query.Limit++
+
+	runs, err := s.repo.ListRuns(ctx, query)
+	if err != nil {
+		return RunListResponse{}, fmt.Errorf("list runs: %w", err)
+	}
+
+	effectiveLimit := query.Limit - 1
+	hasMore := len(runs) > effectiveLimit
+	if hasMore {
+		runs = runs[:effectiveLimit]
+	}
+
+	resp := RunListResponse{
+		Runs:    runs,
+		Limit:   effectiveLimit,
+		Offset:  query.Offset,
+		Count:   len(runs),
+		HasMore: hasMore,
+	}
+	if hasMore {
+		nextOffset := query.Offset + len(runs)
+		resp.NextOffset = &nextOffset
+	}
+
+	return resp, nil
 }
 
 func normalizeHashes(hashes []string) ([]string, error) {
@@ -258,8 +297,41 @@ func normalizeSingleHash(hash string) (string, error) {
 	return normalized, nil
 }
 
+func normalizeRunListRequest(req RunListRequest) RunListRequest {
+	out := req
+	out.ScenarioName = strings.TrimSpace(out.ScenarioName)
+	out.SteamID = strings.TrimSpace(out.SteamID)
+	out.SteamUsername = strings.TrimSpace(out.SteamUsername)
+	out.Query = strings.TrimSpace(out.Query)
+
+	if out.Limit <= 0 {
+		out.Limit = defaultRunsListLimit
+	}
+	if out.Limit > maxRunsListLimit {
+		out.Limit = maxRunsListLimit
+	}
+	if out.Offset < 0 {
+		out.Offset = 0
+	}
+
+	switch out.Sort {
+	case RunsSortUploadedAtAsc, RunsSortUploadedAtDesc, RunsSortEpochAsc, RunsSortEpochDesc, RunsSortScoreAsc, RunsSortScoreDesc:
+	default:
+		out.Sort = RunsSortUploadedAtDesc
+	}
+
+	if out.MinScore != nil && out.MaxScore != nil && *out.MinScore > *out.MaxScore {
+		out.MinScore, out.MaxScore = out.MaxScore, out.MinScore
+	}
+	if out.FromEpoch != nil && out.ToEpoch != nil && *out.FromEpoch > *out.ToEpoch {
+		out.FromEpoch, out.ToEpoch = out.ToEpoch, out.FromEpoch
+	}
+
+	return out
+}
+
 func buildObjectKey(prefix string, epochMilli int64, hash string, fallback time.Time) string {
-	name := hash + ".refleks"
+	name := hash + RunFileExtension
 	day := fallback.UTC()
 	if epochMilli > 0 {
 		day = time.UnixMilli(epochMilli).UTC()
@@ -269,6 +341,17 @@ func buildObjectKey(prefix string, epochMilli int64, hash string, fallback time.
 		return datePath + "/" + name
 	}
 	return prefix + "/" + datePath + "/" + name
+}
+
+func ensureRunFileExtension(fileName string) string {
+	trimmed := strings.TrimSpace(fileName)
+	if trimmed == "" {
+		return trimmed
+	}
+	if strings.HasSuffix(strings.ToLower(trimmed), RunFileExtension) {
+		return trimmed
+	}
+	return trimmed + RunFileExtension
 }
 
 func sha256Hex(raw []byte) string {

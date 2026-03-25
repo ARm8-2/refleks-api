@@ -6,6 +6,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"math"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +47,119 @@ func (m *memRepo) RunByHash(_ context.Context, hash string) (StoredRun, error) {
 		return StoredRun{}, ErrObjectNotFound
 	}
 	return StoredRun{ObjectKey: meta.ObjectKey, FileName: meta.FileName}, nil
+}
+
+func (m *memRepo) ListRuns(_ context.Context, req RunListRequest) ([]RunListItem, error) {
+	items := make([]RunListItem, 0, len(m.runs))
+	for _, meta := range m.runs {
+		item := RunListItem{
+			Hash:          meta.Hash,
+			FileName:      meta.FileName,
+			ScenarioName:  meta.ScenarioName,
+			SteamID:       meta.SteamID,
+			SteamUsername: meta.SteamUsername,
+			EpochMilli:    meta.EpochMilli,
+			UploadedAt:    meta.UploadedAt,
+			SizeBytes:     meta.SizeBytes,
+			Score:         meta.Score,
+			Accuracy:      meta.Accuracy,
+			AvgTTKSeconds: meta.AvgTTKSeconds,
+			DurationSecs:  meta.DurationSecs,
+			SensCM360:     meta.SensCM360,
+			HasMouseTrace: meta.HasMouseTrace,
+			AvgMouseSpeed: meta.AvgMouseSpeed,
+			MouseVID:      meta.MouseVID,
+			MousePID:      meta.MousePID,
+		}
+
+		if req.ScenarioName != "" && !containsFold(item.ScenarioName, req.ScenarioName) {
+			continue
+		}
+		if req.SteamID != "" && !containsFold(item.SteamID, req.SteamID) {
+			continue
+		}
+		if req.SteamUsername != "" && !containsFold(item.SteamUsername, req.SteamUsername) {
+			continue
+		}
+		if req.Query != "" &&
+			!containsFold(item.FileName, req.Query) &&
+			!containsFold(item.ScenarioName, req.Query) &&
+			!containsFold(item.SteamUsername, req.Query) {
+			continue
+		}
+		if req.HasMouseTrace != nil && item.HasMouseTrace != *req.HasMouseTrace {
+			continue
+		}
+		if req.MinScore != nil {
+			if item.Score == nil || *item.Score < *req.MinScore {
+				continue
+			}
+		}
+		if req.MaxScore != nil {
+			if item.Score == nil || *item.Score > *req.MaxScore {
+				continue
+			}
+		}
+		if req.FromEpoch != nil && item.EpochMilli < *req.FromEpoch {
+			continue
+		}
+		if req.ToEpoch != nil && item.EpochMilli > *req.ToEpoch {
+			continue
+		}
+
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		a := items[i]
+		b := items[j]
+		switch req.Sort {
+		case RunsSortUploadedAtAsc:
+			if a.UploadedAt.Equal(b.UploadedAt) {
+				return a.Hash < b.Hash
+			}
+			return a.UploadedAt.Before(b.UploadedAt)
+		case RunsSortEpochDesc:
+			if a.EpochMilli == b.EpochMilli {
+				return a.Hash < b.Hash
+			}
+			return a.EpochMilli > b.EpochMilli
+		case RunsSortEpochAsc:
+			if a.EpochMilli == b.EpochMilli {
+				return a.Hash < b.Hash
+			}
+			return a.EpochMilli < b.EpochMilli
+		case RunsSortScoreDesc:
+			av := scoreOrNegInf(a.Score)
+			bv := scoreOrNegInf(b.Score)
+			if av == bv {
+				return a.Hash < b.Hash
+			}
+			return av > bv
+		case RunsSortScoreAsc:
+			av := scoreOrNegInf(a.Score)
+			bv := scoreOrNegInf(b.Score)
+			if av == bv {
+				return a.Hash < b.Hash
+			}
+			return av < bv
+		default:
+			if a.UploadedAt.Equal(b.UploadedAt) {
+				return a.Hash < b.Hash
+			}
+			return a.UploadedAt.After(b.UploadedAt)
+		}
+	})
+
+	if req.Offset >= len(items) {
+		return []RunListItem{}, nil
+	}
+	items = items[req.Offset:]
+	if req.Limit > 0 && len(items) > req.Limit {
+		items = items[:req.Limit]
+	}
+
+	return items, nil
 }
 
 type memStore struct {
@@ -228,6 +344,101 @@ func TestServiceDownloadRawURL_Success(t *testing.T) {
 	if link.FileName != synced.FileName {
 		t.Fatalf("unexpected download filename: %s", link.FileName)
 	}
+}
+
+func TestServiceListRuns_FilterSortPagination(t *testing.T) {
+	t.Parallel()
+
+	repo := newMemRepo()
+	repo.runs["h1"] = RunMetadata{
+		Hash:          "h1",
+		FileName:      "run-1.refleks",
+		ScenarioName:  "VT Pat",
+		SteamUsername: "alice",
+		EpochMilli:    2000,
+		UploadedAt:    time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC),
+		Score:         float64PtrTest(88),
+	}
+	repo.runs["h2"] = RunMetadata{
+		Hash:          "h2",
+		FileName:      "run-2.refleks",
+		ScenarioName:  "VT Pat",
+		SteamUsername: "alice",
+		EpochMilli:    3000,
+		UploadedAt:    time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC),
+		Score:         float64PtrTest(99),
+	}
+	repo.runs["h3"] = RunMetadata{
+		Hash:          "h3",
+		FileName:      "run-3.refleks",
+		ScenarioName:  "Other",
+		SteamUsername: "bob",
+		EpochMilli:    1000,
+		UploadedAt:    time.Date(2026, 3, 25, 9, 0, 0, 0, time.UTC),
+		Score:         float64PtrTest(70),
+	}
+
+	svc := NewService(repo, newMemStore(), "runs")
+	resp, err := svc.ListRuns(context.Background(), RunListRequest{
+		Limit:        1,
+		Sort:         RunsSortScoreDesc,
+		ScenarioName: "vt",
+		Query:        "alice",
+		MinScore:     float64PtrTest(80),
+	})
+	if err != nil {
+		t.Fatalf("list runs failed: %v", err)
+	}
+	if resp.Count != 1 {
+		t.Fatalf("expected count 1, got %d", resp.Count)
+	}
+	if !resp.HasMore {
+		t.Fatalf("expected has_more=true")
+	}
+	if len(resp.Runs) != 1 || resp.Runs[0].Hash != "h2" {
+		t.Fatalf("unexpected top run: %#v", resp.Runs)
+	}
+}
+
+func TestServiceSyncOne_AppendsMissingFileExtension(t *testing.T) {
+	t.Parallel()
+
+	repo := newMemRepo()
+	store := newMemStore()
+	svc := NewService(repo, store, "runs")
+
+	raw := buildTestRefleksFile(t, "no-extension", 1742640000000)
+	result, err := svc.SyncOne(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	if result.FileName != "no-extension"+RunFileExtension {
+		t.Fatalf("expected filename with extension, got %q", result.FileName)
+	}
+
+	stored, ok := repo.runs[result.Hash]
+	if !ok {
+		t.Fatalf("expected run in repo")
+	}
+	if stored.FileName != "no-extension"+RunFileExtension {
+		t.Fatalf("expected stored filename with extension, got %q", stored.FileName)
+	}
+}
+
+func float64PtrTest(v float64) *float64 {
+	copy := v
+	return &copy
+}
+
+func containsFold(haystack, needle string) bool {
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
+}
+
+func scoreOrNegInf(v *float64) float64 {
+	if v == nil {
+		return math.Inf(-1)
+	}
+	return *v
 }
 
 func buildTestRefleksFile(t *testing.T, fileName string, epochMilli int64) []byte {

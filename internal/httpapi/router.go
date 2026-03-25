@@ -13,6 +13,7 @@ type AuthRoutes struct {
 
 // RunSyncRoutes bundles optional run sync handlers.
 type RunSyncRoutes struct {
+	RunsList      http.Handler
 	Sync          http.Handler
 	BulkSync      http.Handler
 	MissingHashes http.Handler
@@ -33,6 +34,9 @@ func NewRouter(logger *slog.Logger, statusHandler http.Handler, authRoutes *Auth
 		}
 	}
 	if runSyncRoutes != nil {
+		if runSyncRoutes.RunsList != nil {
+			mux.Handle("GET /v1/runs", runSyncRoutes.RunsList)
+		}
 		if runSyncRoutes.Sync != nil {
 			mux.Handle("POST /v1/runs/sync", runSyncRoutes.Sync)
 		}

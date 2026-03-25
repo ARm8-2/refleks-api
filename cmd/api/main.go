@@ -88,6 +88,7 @@ func run() error {
 		})
 
 		runSyncRoutes = &httpapi.RunSyncRoutes{
+			RunsList:      http.HandlerFunc(h.HandleListRuns),
 			Sync:          http.HandlerFunc(h.HandleSync),
 			BulkSync:      http.HandlerFunc(h.HandleBulkSync),
 			MissingHashes: http.HandlerFunc(h.HandleMissingHashes),

@@ -239,6 +239,68 @@ func (h *Handler) HandleDownloadRawURL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// HandleListRuns returns filtered/sorted run metadata for frontend browsing.
+func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	limit, err := optionalIntQuery(q.Get("limit"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "limit must be an integer")
+		return
+	}
+	offset, err := optionalIntQuery(q.Get("offset"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "offset must be an integer")
+		return
+	}
+	minScore, err := optionalFloat64Query(q.Get("min_score"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "min_score must be a number")
+		return
+	}
+	maxScore, err := optionalFloat64Query(q.Get("max_score"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "max_score must be a number")
+		return
+	}
+	fromEpoch, err := optionalInt64Query(q.Get("from_epoch"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "from_epoch must be an integer")
+		return
+	}
+	toEpoch, err := optionalInt64Query(q.Get("to_epoch"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "to_epoch must be an integer")
+		return
+	}
+	hasMouseTrace, err := optionalBoolQuery(q.Get("has_mouse_trace"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "has_mouse_trace must be true or false")
+		return
+	}
+
+	resp, err := h.service.ListRuns(r.Context(), RunListRequest{
+		Limit:         limit,
+		Offset:        offset,
+		Sort:          RunsSort(strings.TrimSpace(q.Get("sort"))),
+		ScenarioName:  strings.TrimSpace(q.Get("scenario")),
+		SteamID:       strings.TrimSpace(q.Get("steam_id")),
+		SteamUsername: strings.TrimSpace(q.Get("steam_username")),
+		Query:         strings.TrimSpace(q.Get("q")),
+		HasMouseTrace: hasMouseTrace,
+		MinScore:      minScore,
+		MaxScore:      maxScore,
+		FromEpoch:     fromEpoch,
+		ToEpoch:       toEpoch,
+	})
+	if err != nil {
+		h.writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) readSingleUpload(w http.ResponseWriter, r *http.Request) (string, []byte, error) {
 	contentType := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
 	if strings.HasPrefix(contentType, "multipart/form-data") {
@@ -317,4 +379,48 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func optionalIntQuery(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	return strconv.Atoi(raw)
+}
+
+func optionalInt64Query(raw string) (*int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func optionalFloat64Query(raw string) (*float64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
+}
+
+func optionalBoolQuery(raw string) (*bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
