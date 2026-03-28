@@ -18,7 +18,6 @@ type RunMetadata struct {
 	SizeBytes     int64
 	ObjectKey     string
 	UploadedAt    time.Time
-	Compression   uint8
 	FormatVersion uint8
 	Score         *float64
 	Accuracy      *float64
@@ -48,7 +47,6 @@ type ParsedRefleksFile struct {
 	SteamID       string
 	SteamUsername string
 	EpochMilli    int64
-	Compression   uint8
 	FormatVersion uint8
 	Score         *float64
 	Accuracy      *float64

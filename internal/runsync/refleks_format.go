@@ -84,7 +84,6 @@ func ParseRefleksFile(raw []byte) (ParsedRefleksFile, error) {
 		return ParsedRefleksFile{}, err
 	}
 	parsed.EpochMilli = epoch
-	parsed.Compression = compression
 	parsed.FormatVersion = version
 	return parsed, nil
 }

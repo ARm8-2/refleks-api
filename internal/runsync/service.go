@@ -102,7 +102,6 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		SizeBytes:     int64(len(raw)),
 		ObjectKey:     objectKey,
 		UploadedAt:    uploadedAt,
-		Compression:   parsed.Compression,
 		FormatVersion: parsed.FormatVersion,
 		Score:         parsed.Score,
 		Accuracy:      parsed.Accuracy,

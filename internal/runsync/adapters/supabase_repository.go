@@ -254,7 +254,6 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runsync.RunMeta
 			epoch_milli,
 			size_bytes,
 			object_key,
-			compression,
 			format_version,
 			score,
 			accuracy,
@@ -269,7 +268,7 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runsync.RunMeta
 		)
 		VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-			$11,$12,$13,$14,$15,$16,$17,$18,$19
+			$11,$12,$13,$14,$15,$16,$17,$18
 		)
 		ON CONFLICT (hash) DO NOTHING
 	`,
@@ -280,7 +279,6 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runsync.RunMeta
 		meta.EpochMilli,
 		meta.SizeBytes,
 		meta.ObjectKey,
-		meta.Compression,
 		meta.FormatVersion,
 		meta.Score,
 		meta.Accuracy,
@@ -415,7 +413,6 @@ func (r *SupabaseRepository) ensureSchema(ctx context.Context) error {
 			epoch_milli BIGINT NOT NULL,
 			size_bytes BIGINT NOT NULL,
 			object_key TEXT NOT NULL,
-			compression SMALLINT NOT NULL,
 			format_version SMALLINT NOT NULL,
 			score DOUBLE PRECISION,
 			accuracy DOUBLE PRECISION,
@@ -435,6 +432,8 @@ func (r *SupabaseRepository) ensureSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_runs_epoch ON runs (epoch_milli DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_runs_scenario_id ON runs (scenario_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_runs_account_id ON runs (account_id)`,
+		`ALTER TABLE runs ADD COLUMN IF NOT EXISTS format_version SMALLINT NOT NULL DEFAULT 1`,
+		`ALTER TABLE runs DROP COLUMN IF EXISTS compression`,
 	}
 
 	for _, statement := range statements {
