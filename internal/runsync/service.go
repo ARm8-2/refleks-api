@@ -101,7 +101,6 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		EpochMilli:    parsed.EpochMilli,
 		SizeBytes:     int64(len(raw)),
 		ObjectKey:     objectKey,
-		ChecksumHex:   checksumToHex(parsed.Checksum),
 		UploadedAt:    uploadedAt,
 		Compression:   parsed.Compression,
 		FormatVersion: parsed.FormatVersion,
@@ -357,17 +356,4 @@ func ensureRunFileExtension(fileName string) string {
 func sha256Hex(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
-}
-
-func checksumToHex(v uint64) string {
-	var b [8]byte
-	b[0] = byte(v)
-	b[1] = byte(v >> 8)
-	b[2] = byte(v >> 16)
-	b[3] = byte(v >> 24)
-	b[4] = byte(v >> 32)
-	b[5] = byte(v >> 40)
-	b[6] = byte(v >> 48)
-	b[7] = byte(v >> 56)
-	return hex.EncodeToString(b[:])
 }

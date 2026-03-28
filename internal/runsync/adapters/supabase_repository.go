@@ -254,7 +254,6 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runsync.RunMeta
 			epoch_milli,
 			size_bytes,
 			object_key,
-			checksum_hex,
 			compression,
 			format_version,
 			score,
@@ -270,7 +269,7 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runsync.RunMeta
 		)
 		VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-			$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+			$11,$12,$13,$14,$15,$16,$17,$18,$19
 		)
 		ON CONFLICT (hash) DO NOTHING
 	`,
@@ -281,7 +280,6 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runsync.RunMeta
 		meta.EpochMilli,
 		meta.SizeBytes,
 		meta.ObjectKey,
-		meta.ChecksumHex,
 		meta.Compression,
 		meta.FormatVersion,
 		meta.Score,
@@ -417,7 +415,6 @@ func (r *SupabaseRepository) ensureSchema(ctx context.Context) error {
 			epoch_milli BIGINT NOT NULL,
 			size_bytes BIGINT NOT NULL,
 			object_key TEXT NOT NULL,
-			checksum_hex CHAR(16) NOT NULL,
 			compression SMALLINT NOT NULL,
 			format_version SMALLINT NOT NULL,
 			score DOUBLE PRECISION,

@@ -86,7 +86,6 @@ func ParseRefleksFile(raw []byte) (ParsedRefleksFile, error) {
 	parsed.EpochMilli = epoch
 	parsed.Compression = compression
 	parsed.FormatVersion = version
-	parsed.Checksum = wantChecksum
 	return parsed, nil
 }
 

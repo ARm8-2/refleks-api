@@ -17,7 +17,6 @@ type RunMetadata struct {
 	EpochMilli    int64
 	SizeBytes     int64
 	ObjectKey     string
-	ChecksumHex   string
 	UploadedAt    time.Time
 	Compression   uint8
 	FormatVersion uint8
@@ -51,7 +50,6 @@ type ParsedRefleksFile struct {
 	EpochMilli    int64
 	Compression   uint8
 	FormatVersion uint8
-	Checksum      uint64
 	Score         *float64
 	Accuracy      *float64
 	AvgTTKSeconds *float64
