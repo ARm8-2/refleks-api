@@ -11,6 +11,17 @@ type AuthRoutes struct {
 	SteamLogin  http.Handler
 }
 
+// BenchmarkRoutes bundles optional benchmark handlers.
+type BenchmarkRoutes struct {
+	List http.Handler
+}
+
+// LeaderboardRoutes bundles optional leaderboard handlers.
+type LeaderboardRoutes struct {
+	Scenario            http.Handler
+	BenchmarkDifficulty http.Handler
+}
+
 // RunSyncRoutes bundles optional run sync handlers.
 type RunSyncRoutes struct {
 	RunsList      http.Handler
@@ -22,7 +33,7 @@ type RunSyncRoutes struct {
 }
 
 // NewRouter configures API routes and middleware.
-func NewRouter(logger *slog.Logger, statusHandler http.Handler, authRoutes *AuthRoutes, runSyncRoutes *RunSyncRoutes) http.Handler {
+func NewRouter(logger *slog.Logger, statusHandler http.Handler, authRoutes *AuthRoutes, benchmarkRoutes *BenchmarkRoutes, leaderboardRoutes *LeaderboardRoutes, runSyncRoutes *RunSyncRoutes) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/status", statusHandler)
 	if authRoutes != nil {
@@ -31,6 +42,19 @@ func NewRouter(logger *slog.Logger, statusHandler http.Handler, authRoutes *Auth
 		}
 		if authRoutes.SteamLogin != nil {
 			mux.Handle("POST /v1/auth/steam/login", authRoutes.SteamLogin)
+		}
+	}
+	if benchmarkRoutes != nil {
+		if benchmarkRoutes.List != nil {
+			mux.Handle("GET /v1/benchmarks", benchmarkRoutes.List)
+		}
+	}
+	if leaderboardRoutes != nil {
+		if leaderboardRoutes.Scenario != nil {
+			mux.Handle("GET /v1/leaderboards/scenario", leaderboardRoutes.Scenario)
+		}
+		if leaderboardRoutes.BenchmarkDifficulty != nil {
+			mux.Handle("GET /v1/leaderboards/benchmark-difficulty", leaderboardRoutes.BenchmarkDifficulty)
 		}
 	}
 	if runSyncRoutes != nil {

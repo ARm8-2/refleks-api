@@ -11,9 +11,13 @@ import (
 	"time"
 
 	"refleks-api/internal/auth"
+	"refleks-api/internal/benchmarks"
+	benchadapters "refleks-api/internal/benchmarks/adapters"
 	"refleks-api/internal/config"
 	"refleks-api/internal/httpapi"
 	"refleks-api/internal/httpserver"
+	"refleks-api/internal/leaderboards"
+	leaderboardadapters "refleks-api/internal/leaderboards/adapters"
 	"refleks-api/internal/runsync"
 	"refleks-api/internal/runsync/adapters"
 	"refleks-api/internal/status"
@@ -39,12 +43,19 @@ func run() error {
 
 	statusService := status.NewService(cfg.AppName, cfg.Environment, cfg.Version, time.Now())
 	var authRoutes *httpapi.AuthRoutes
+	var benchmarkRoutes *httpapi.BenchmarkRoutes
+	var leaderboardRoutes *httpapi.LeaderboardRoutes
 
 	var supabaseClient *supabase.Client
 	if cfg.SupabaseDBURL != "" {
 		supabaseClient, err = supabase.NewClient(context.Background(), cfg.SupabaseDBURL)
 		if err != nil {
 			return fmt.Errorf("init supabase client: %w", err)
+		}
+		pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelPing()
+		if err := supabaseClient.Ping(pingCtx); err != nil {
+			return fmt.Errorf("ping supabase: %w", err)
 		}
 		defer supabaseClient.Close()
 		logger.Info("supabase client enabled")
@@ -59,9 +70,34 @@ func run() error {
 		SteamLogin:  http.HandlerFunc(authHandler.HandleSteamLoginStub),
 	}
 
+	if supabaseClient != nil {
+		benchmarkRepo, err := benchadapters.NewSupabaseRepository(supabaseClient.Pool())
+		if err != nil {
+			return fmt.Errorf("init benchmark repository: %w", err)
+		}
+		benchmarkSvc := benchmarks.NewService(benchmarkRepo)
+		benchmarkHandler := benchmarks.NewHandler(benchmarkSvc)
+		benchmarkRoutes = &httpapi.BenchmarkRoutes{List: http.HandlerFunc(benchmarkHandler.HandleList)}
+
+		leaderboardRepo, err := leaderboardadapters.NewSupabaseRepository(supabaseClient.Pool())
+		if err != nil {
+			return fmt.Errorf("init leaderboard repository: %w", err)
+		}
+		leaderboardSvc := leaderboards.NewService(leaderboardRepo)
+		leaderboardHandler := leaderboards.NewHandler(leaderboardSvc)
+		leaderboardRoutes = &httpapi.LeaderboardRoutes{
+			Scenario:            http.HandlerFunc(leaderboardHandler.HandleScenario),
+			BenchmarkDifficulty: http.HandlerFunc(leaderboardHandler.HandleBenchmarkDifficulty),
+		}
+
+		logger.Info("benchmark and leaderboard endpoints enabled")
+	} else {
+		logger.Warn("benchmark and leaderboard endpoints disabled: SUPABASE_DB_URL is empty")
+	}
+
 	var runSyncRoutes *httpapi.RunSyncRoutes
 	if cfg.RunSyncEnabled {
-		repo, err := adapters.NewSupabaseRepository(context.Background(), supabaseClient.Pool())
+		repo, err := adapters.NewSupabaseRepository(supabaseClient.Pool())
 		if err != nil {
 			return fmt.Errorf("init supabase repository: %w", err)
 		}
@@ -101,7 +137,7 @@ func run() error {
 		logger.Warn("run sync disabled")
 	}
 
-	router := httpapi.NewRouter(logger, status.NewHandler(statusService), authRoutes, runSyncRoutes)
+	router := httpapi.NewRouter(logger, status.NewHandler(statusService), authRoutes, benchmarkRoutes, leaderboardRoutes, runSyncRoutes)
 	server := httpserver.New(cfg, logger, router)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

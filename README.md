@@ -23,6 +23,13 @@ This repository now includes:
 │   ├── auth/
 │   │   ├── handler.go
 │   │   └── service.go
+│   ├── benchmarks/
+│   │   ├── adapters/
+│   │   │   └── supabase_repository.go
+│   │   ├── contracts.go
+│   │   ├── handler.go
+│   │   ├── service.go
+│   │   └── types.go
 │   ├── config/
 │   │   └── config.go
 │   ├── httpapi/
@@ -30,6 +37,13 @@ This repository now includes:
 │   │   └── router.go
 │   ├── httpserver/
 │   │   └── server.go
+│   ├── leaderboards/
+│   │   ├── adapters/
+│   │   │   └── supabase_repository.go
+│   │   ├── contracts.go
+│   │   ├── handler.go
+│   │   ├── service.go
+│   │   └── types.go
 │   ├── runsync/
 │   │   ├── adapters/
 │   │   │   ├── r2_store.go
@@ -78,8 +92,36 @@ docker run --rm -p 8080:8080 --env-file .env refleks-api:local
 
 The image is multi-stage and optimized for runtime size:
 
-- Build stage: Go toolchain with BuildKit cache mounts for faster rebuilds.
+- Build stage: Go toolchain compiling a static Linux binary.
 - Runtime stage: distroless non-root image with only the compiled binary.
+
+### Run Alongside Worker (VPS)
+
+If you run API and worker as separate containers on the same Ubuntu VPS, keep them on one Docker network and use restart policies.
+
+```bash
+docker network create refleks-net
+
+docker run -d \
+	--name refleks-api \
+	--restart unless-stopped \
+	--network refleks-net \
+	-p 8080:8080 \
+	--env-file .env \
+	refleks-api:local
+
+docker run -d \
+	--name refleks-worker \
+	--restart unless-stopped \
+	--network refleks-net \
+	--env-file worker.env \
+	refleks-worker:latest
+```
+
+Notes:
+
+- The worker normally does not expose an HTTP port.
+- Both services should point to the same Supabase Postgres and R2 credentials.
 
 ## Status Endpoint
 
@@ -147,6 +189,137 @@ Response:
 ```
 
 This endpoint is a stable contract placeholder for premium/private access flows (for example, private parquet access).
+
+## Benchmark Endpoints
+
+Benchmark endpoints are read-only and are enabled when `SUPABASE_DB_URL` is configured.
+
+### List Benchmarks
+
+Request:
+
+```http
+GET /v1/benchmarks?q=voltaic&include_inactive=false
+```
+
+Supported query params:
+
+- `q` optional benchmark text filter (matches benchmark name or abbreviation)
+- `include_inactive` optional bool (`false` by default)
+
+Response:
+
+```json
+{
+	"benchmarks": [
+		{
+			"benchmarkName": "Voltaic Intermediate S5",
+			"rankCalculation": "voltaic_energy",
+			"abbreviation": "VT Int S5",
+			"color": "#6D8CFF",
+			"spreadsheetURL": "https://example.test/sheet",
+			"dateAdded": "2025-01-22",
+			"difficulties": [
+				{
+					"difficultyName": "Intermediate",
+					"kovaaksBenchmarkId": 12345,
+					"sharecode": "KOVAAKSXYZ",
+					"rankColors": {
+						"Gold": "#F9C74F"
+					},
+					"categories": [
+						{
+							"categoryName": "Static",
+							"color": "#1D3557",
+							"subcategories": [
+								{
+									"subcategoryName": "1w3ts",
+									"scenarioCount": 3,
+									"color": "#457B9D"
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	],
+	"count": 1
+}
+```
+
+## Leaderboard Endpoints
+
+Leaderboard endpoints are read-only and are enabled when `SUPABASE_DB_URL` is configured.
+
+### Scenario Leaderboard
+
+Request:
+
+```http
+GET /v1/leaderboards/scenario?scenario=VT%201w3ts&limit=100&offset=0
+```
+
+You can also query by `scenario_id`.
+
+Response:
+
+```json
+{
+	"scenario_id": 42,
+	"scenario_name": "VT 1w3ts Intermediate S5",
+	"entries": [
+		{
+			"rank": 1,
+			"best_score": 1562.4,
+			"best_epoch_milli": 1762190000000,
+			"steam_id": "76561198000000000",
+			"steam_username": "alice"
+		}
+	],
+	"limit": 100,
+	"offset": 0,
+	"count": 1,
+	"has_more": false,
+	"refreshed_at": "2026-04-04T14:28:00Z"
+}
+```
+
+### Benchmark Difficulty Leaderboard
+
+Request:
+
+```http
+GET /v1/leaderboards/benchmark-difficulty?kovaaks_benchmark_id=12345&limit=100&offset=0
+```
+
+You can also query by `difficulty_id`.
+
+Response:
+
+```json
+{
+	"difficulty_id": 10,
+	"kovaaks_benchmark_id": 12345,
+	"benchmark_name": "Voltaic Intermediate S5",
+	"difficulty_name": "Intermediate",
+	"entries": [
+		{
+			"rank": 1,
+			"composite_score": 8654.2,
+			"matched_scenarios": 18,
+			"last_epoch_milli": 1762190000000,
+			"steam_id": "76561198000000000",
+			"steam_username": "alice"
+		}
+	],
+	"limit": 100,
+	"offset": 0,
+	"count": 1,
+	"has_more": false,
+	"refreshed_at": "2026-04-04T14:28:00Z"
+}
+```
 
 ## Run Sync Endpoints
 
@@ -219,6 +392,8 @@ Content-Type: application/json
 	"hashes": ["<sha256>", "<sha256>"]
 }
 ```
+
+Note: `hashes` are SHA-256 digests of the full raw `.refleks` file bytes (the same `hash` returned by sync responses), not the internal payload checksum embedded inside the `.refleks` binary.
 
 Response:
 
@@ -350,7 +525,7 @@ Environment variables:
 - `HTTP_READ_HEADER_TIMEOUT` (default: `5s`)
 - `HTTP_SHUTDOWN_TIMEOUT` (default: `10s`)
 - `RUNSYNC_ENABLED` (default: `false`)
-- `SUPABASE_DB_URL` (required when run sync is enabled, optional for auth stub reachability checks)
+- `SUPABASE_DB_URL` (optional; when set, enables database-backed endpoints such as benchmarks, leaderboards, and run sync, and is validated on startup)
 - `R2_ENDPOINT` (required when run sync is enabled)
 - `R2_REGION` (default: `auto`)
 - `R2_RAW_PUBLIC_BUCKET` (default: `refleks-raw-public`)
@@ -365,7 +540,9 @@ Environment variables:
 - `RUNSYNC_MAX_BULK_BYTES` (default: `262144000`)
 - `RUNSYNC_MAX_MISSING_HASHES` (default: `1000`)
 
-When `RUNSYNC_ENABLED=true`, the service auto-creates `accounts`, `scenarios`, and `runs` tables and indexes on startup.
+When `RUNSYNC_ENABLED=true`, the API expects `accounts`, `scenarios`, and `runs` tables/indexes to already exist (for example created by a separate worker or migration container).
+
+When benchmark/leaderboard endpoints are enabled (`SUPABASE_DB_URL` is set), the API expects benchmark and leaderboard tables to exist (for example created by a separate worker or migration container).
 
 ## Test
 

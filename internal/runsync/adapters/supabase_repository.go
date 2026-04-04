@@ -19,17 +19,12 @@ type SupabaseRepository struct {
 }
 
 // NewSupabaseRepository builds a run sync repository from a shared Supabase pool.
-func NewSupabaseRepository(ctx context.Context, pool *pgxpool.Pool) (*SupabaseRepository, error) {
+func NewSupabaseRepository(pool *pgxpool.Pool) (*SupabaseRepository, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("supabase pool is required")
 	}
 
-	repo := &SupabaseRepository{pool: pool}
-	if err := repo.ensureSchema(ctx); err != nil {
-		return nil, err
-	}
-
-	return repo, nil
+	return &SupabaseRepository{pool: pool}, nil
 }
 
 // ExistingHashes returns the subset of hashes that already exist.
@@ -383,64 +378,4 @@ func runsOrderBySQL(sort runsync.RunsSort) string {
 	default:
 		return "r.uploaded_at DESC, r.id DESC"
 	}
-}
-
-func (r *SupabaseRepository) ensureSchema(ctx context.Context) error {
-	statements := []string{
-		`CREATE TABLE IF NOT EXISTS accounts (
-			id BIGSERIAL PRIMARY KEY,
-			steam_id TEXT NOT NULL UNIQUE,
-			steam_username TEXT,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS scenarios (
-			id BIGSERIAL PRIMARY KEY,
-			scenario_name TEXT NOT NULL UNIQUE,
-			median_score DOUBLE PRECISION,
-			stddev_score DOUBLE PRECISION,
-			p95_score DOUBLE PRECISION,
-			run_count BIGINT NOT NULL DEFAULT 0,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)`,
-		`CREATE TABLE IF NOT EXISTS runs (
-			id BIGSERIAL PRIMARY KEY,
-			account_id BIGINT REFERENCES accounts(id) ON DELETE SET NULL,
-			scenario_id BIGINT NOT NULL REFERENCES scenarios(id) ON DELETE RESTRICT,
-			hash CHAR(64) NOT NULL,
-			file_name TEXT NOT NULL,
-			epoch_milli BIGINT NOT NULL,
-			size_bytes BIGINT NOT NULL,
-			object_key TEXT NOT NULL,
-			format_version SMALLINT NOT NULL,
-			score DOUBLE PRECISION,
-			accuracy DOUBLE PRECISION,
-			avg_ttk_seconds DOUBLE PRECISION,
-			duration_seconds DOUBLE PRECISION,
-			sens_cm360 DOUBLE PRECISION,
-			has_mouse_trace BOOLEAN NOT NULL DEFAULT FALSE,
-			avg_mouse_speed DOUBLE PRECISION,
-			mouse_vid TEXT,
-			mouse_pid TEXT,
-			uploaded_at TIMESTAMPTZ NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			UNIQUE (hash),
-			UNIQUE (object_key)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_runs_uploaded_at ON runs (uploaded_at DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_runs_epoch ON runs (epoch_milli DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_runs_scenario_id ON runs (scenario_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_runs_account_id ON runs (account_id)`,
-		`ALTER TABLE runs ADD COLUMN IF NOT EXISTS format_version SMALLINT NOT NULL DEFAULT 1`,
-		`ALTER TABLE runs DROP COLUMN IF EXISTS compression`,
-	}
-
-	for _, statement := range statements {
-		if _, err := r.pool.Exec(ctx, statement); err != nil {
-			return fmt.Errorf("ensure schema: %w", err)
-		}
-	}
-
-	return nil
 }
