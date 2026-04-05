@@ -310,83 +310,75 @@ func parseMouseMetrics(r io.Reader) (parsedMouseMetrics, error) {
 }
 
 func parseRunEnvironment(r io.Reader) (parsedEnvironment, error) {
-	var err error
-	readEnvString := func() (string, error) {
-		return readString(r, maxStringBytes)
-	}
-
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
-		return parsedEnvironment{}, err
-	}
-	steamID, err := readEnvString()
+	steamID, err := readString(r, maxStringBytes)
 	if err != nil {
 		return parsedEnvironment{}, err
 	}
-	steamUsername, err := readEnvString()
+	steamUsername, err := readString(r, maxStringBytes)
 	if err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readInt32(r); err != nil {
+	if _, err := readInt32(r); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readInt32(r); err != nil {
+	if _, err := readInt32(r); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readFloat64(r); err != nil {
+	if _, err := readFloat64(r); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readInt32(r); err != nil {
+	if _, err := readInt32(r); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readInt32(r); err != nil {
+	if _, err := readInt32(r); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readUint8(r); err != nil {
+	if _, err := readUint8(r); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
-	mouseVID, err := readEnvString()
+	mouseVID, err := readString(r, maxStringBytes)
 	if err != nil {
 		return parsedEnvironment{}, err
 	}
-	mousePID, err := readEnvString()
+	mousePID, err := readString(r, maxStringBytes)
 	if err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readEnvString(); err != nil {
+	if _, err := readString(r, maxStringBytes); err != nil {
 		return parsedEnvironment{}, err
 	}
 	tracePoints, err := readInt32(r)
 	if err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readFloat64(r); err != nil {
+	if _, err := readFloat64(r); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err = readInt32(r); err != nil {
+	if _, err := readInt32(r); err != nil {
 		return parsedEnvironment{}, err
 	}
 
