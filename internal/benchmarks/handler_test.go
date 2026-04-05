@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,25 @@ func TestHandlerHandleList_OK(t *testing.T) {
 	}
 	if body.Count != 1 {
 		t.Fatalf("expected count=1, got %d", body.Count)
+	}
+}
+
+func TestHandlerHandleList_DisablesHTMLEscaping(t *testing.T) {
+	t.Parallel()
+
+	repo := &testRepo{items: []Benchmark{{BenchmarkName: "Dark & Rafal SpeedTS"}}}
+	h := NewHandler(NewService(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/benchmarks", nil)
+	rec := httptest.NewRecorder()
+
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if body := rec.Body.String(); strings.Contains(body, "\\u0026") {
+		t.Fatalf("expected literal ampersand in response body, got %q", body)
 	}
 }
 
