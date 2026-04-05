@@ -466,7 +466,7 @@ func buildTestRefleksFile(t *testing.T, fileName string, epochMilli int64) []byt
 		t.Fatalf("write trace len: %v", err)
 	}
 
-	for i := 0; i < 8; i++ { // first 8 env strings
+	for i := 0; i < 7; i++ { // appVersion, os, arch, osVersion, steamID, personaName, cpuName
 		writeString("")
 	}
 	if err := binary.Write(payload, binary.LittleEndian, int32(0)); err != nil { // cpu cores

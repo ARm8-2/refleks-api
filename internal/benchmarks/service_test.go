@@ -2,6 +2,7 @@ package benchmarks
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -33,7 +34,35 @@ func TestServiceListBenchmarks_TrimsQuery(t *testing.T) {
 	if repo.last.Query != "vt" {
 		t.Fatalf("expected trimmed query, got %q", repo.last.Query)
 	}
+	if repo.last.View != ListViewFull {
+		t.Fatalf("expected default view %q, got %q", ListViewFull, repo.last.View)
+	}
 	if resp.Count != 1 {
 		t.Fatalf("expected count 1, got %d", resp.Count)
+	}
+}
+
+func TestServiceListBenchmarks_PassesProgressView(t *testing.T) {
+	t.Parallel()
+
+	repo := &testRepo{items: []Benchmark{{BenchmarkName: "Voltaic"}}}
+	svc := NewService(repo)
+
+	_, err := svc.ListBenchmarks(context.Background(), ListRequest{View: ListViewProgress})
+	if err != nil {
+		t.Fatalf("list benchmarks: %v", err)
+	}
+	if repo.last.View != ListViewProgress {
+		t.Fatalf("expected view %q, got %q", ListViewProgress, repo.last.View)
+	}
+}
+
+func TestServiceListBenchmarks_InvalidView(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&testRepo{})
+	_, err := svc.ListBenchmarks(context.Background(), ListRequest{View: ListView("nope")})
+	if !errors.Is(err, ErrInvalidView) {
+		t.Fatalf("expected ErrInvalidView, got %v", err)
 	}
 }

@@ -13,7 +13,7 @@ func TestHandlerHandleList_OK(t *testing.T) {
 	repo := &testRepo{items: []Benchmark{{BenchmarkName: "Voltaic"}}}
 	h := NewHandler(NewService(repo))
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/benchmarks?q=vt&include_inactive=true", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/benchmarks?q=vt", nil)
 	rec := httptest.NewRecorder()
 
 	h.HandleList(rec, req)
@@ -21,11 +21,11 @@ func TestHandlerHandleList_OK(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
-	if !repo.last.IncludeInactive {
-		t.Fatalf("expected include_inactive=true")
-	}
 	if repo.last.Query != "vt" {
 		t.Fatalf("expected trimmed query, got %q", repo.last.Query)
+	}
+	if repo.last.View != ListViewFull {
+		t.Fatalf("expected default view %q, got %q", ListViewFull, repo.last.View)
 	}
 
 	var body ListResponse
@@ -37,12 +37,31 @@ func TestHandlerHandleList_OK(t *testing.T) {
 	}
 }
 
-func TestHandlerHandleList_InvalidIncludeInactive(t *testing.T) {
+func TestHandlerHandleList_ProgressView(t *testing.T) {
+	t.Parallel()
+
+	repo := &testRepo{items: []Benchmark{{BenchmarkName: "Voltaic"}}}
+	h := NewHandler(NewService(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/benchmarks?view=progress", nil)
+	rec := httptest.NewRecorder()
+
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if repo.last.View != ListViewProgress {
+		t.Fatalf("expected view %q, got %q", ListViewProgress, repo.last.View)
+	}
+}
+
+func TestHandlerHandleList_InvalidView(t *testing.T) {
 	t.Parallel()
 
 	h := NewHandler(NewService(&testRepo{}))
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/benchmarks?include_inactive=maybe", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/benchmarks?view=invalid", nil)
 	rec := httptest.NewRecorder()
 
 	h.HandleList(rec, req)

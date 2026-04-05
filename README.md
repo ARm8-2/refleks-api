@@ -199,13 +199,21 @@ Benchmark endpoints are read-only and are enabled when `SUPABASE_DB_URL` is conf
 Request:
 
 ```http
-GET /v1/benchmarks?q=voltaic&include_inactive=false
+GET /v1/benchmarks?q=voltaic
+```
+
+Optional compact response mode:
+
+```http
+GET /v1/benchmarks?view=progress
 ```
 
 Supported query params:
 
 - `q` optional benchmark text filter (matches benchmark name or abbreviation)
-- `include_inactive` optional bool (`false` by default)
+- `view` optional response mode: `full` (default) or `progress`
+	- `full`: returns the complete benchmark hierarchy including ordered `ranks` plus scenario links and rank thresholds when available
+	- `progress`: returns the same hierarchy layout used by app `benchmarks_data.json` with `rankColors` map (no scenario link arrays)
 
 Response:
 
@@ -224,18 +232,55 @@ Response:
 					"difficultyName": "Intermediate",
 					"kovaaksBenchmarkId": 12345,
 					"sharecode": "KOVAAKSXYZ",
-					"rankColors": {
-						"Gold": "#F9C74F"
-					},
+					"ranks": [
+						{
+							"name": "Silver",
+							"color": "#CBD9E6"
+						},
+						{
+							"name": "Gold",
+							"color": "#CAB148"
+						}
+					],
+					"scenarios": [
+						{
+							"scenarioName": "VT 1w3ts",
+							"rankThresholds": [
+								5000,
+								6000,
+								7000
+							]
+						}
+					],
 					"categories": [
 						{
 							"categoryName": "Static",
 							"color": "#1D3557",
+							"scenarios": [
+								{
+									"scenarioName": "VT 1w3ts",
+									"rankThresholds": [
+										5000,
+										6000,
+										7000
+									]
+								}
+							],
 							"subcategories": [
 								{
 									"subcategoryName": "1w3ts",
 									"scenarioCount": 3,
-									"color": "#457B9D"
+									"color": "#457B9D",
+									"scenarios": [
+										{
+											"scenarioName": "VT 1w3ts",
+											"rankThresholds": [
+												5000,
+												6000,
+												7000
+											]
+										}
+									]
 								}
 							]
 						}
