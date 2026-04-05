@@ -57,6 +57,33 @@ func TestHandlerHandleList_DisablesHTMLEscaping(t *testing.T) {
 	}
 }
 
+func TestHandlerHandleList_AlwaysEmitsRanksArray(t *testing.T) {
+	t.Parallel()
+
+	repo := &testRepo{items: []Benchmark{{
+		BenchmarkName: "Voltaic",
+		Difficulties: []BenchmarkDifficulty{{
+			DifficultyName:     "Intermediate",
+			KovaaksBenchmarkID: 123,
+			Sharecode:          "KOVAAKSXYZ",
+		}},
+	}}}
+	h := NewHandler(NewService(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/benchmarks", nil)
+	rec := httptest.NewRecorder()
+
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "\"ranks\":[]") {
+		t.Fatalf("expected ranks to be serialized as empty array, got %q", body)
+	}
+}
+
 func TestHandlerHandleList_ProgressView(t *testing.T) {
 	t.Parallel()
 

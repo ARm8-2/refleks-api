@@ -23,8 +23,7 @@ type BenchmarkDifficulty struct {
 	DifficultyName     string              `json:"difficultyName"`
 	KovaaksBenchmarkID int64               `json:"kovaaksBenchmarkId"`
 	Sharecode          string              `json:"sharecode"`
-	RankColors         map[string]string   `json:"rankColors,omitempty"`
-	Ranks              []BenchmarkRank     `json:"ranks,omitempty"`
+	Ranks              []BenchmarkRank     `json:"ranks"`
 	Scenarios          []BenchmarkScenario `json:"scenarios,omitempty"`
 	Categories         []BenchmarkCategory `json:"categories"`
 }

@@ -66,3 +66,33 @@ func TestServiceListBenchmarks_InvalidView(t *testing.T) {
 		t.Fatalf("expected ErrInvalidView, got %v", err)
 	}
 }
+
+func TestServiceListBenchmarks_NormalizesSliceFields(t *testing.T) {
+	t.Parallel()
+
+	repo := &testRepo{items: []Benchmark{{
+		BenchmarkName: "Voltaic",
+		Difficulties: []BenchmarkDifficulty{{
+			DifficultyName:     "Intermediate",
+			KovaaksBenchmarkID: 123,
+			Sharecode:          "KOVAAKSXYZ",
+		}},
+	}}}
+	svc := NewService(repo)
+
+	resp, err := svc.ListBenchmarks(context.Background(), ListRequest{})
+	if err != nil {
+		t.Fatalf("list benchmarks: %v", err)
+	}
+
+	if len(resp.Benchmarks) != 1 || len(resp.Benchmarks[0].Difficulties) != 1 {
+		t.Fatalf("expected one benchmark with one difficulty")
+	}
+	difficulty := resp.Benchmarks[0].Difficulties[0]
+	if difficulty.Ranks == nil {
+		t.Fatalf("expected ranks to be normalized to empty slice")
+	}
+	if difficulty.Categories == nil {
+		t.Fatalf("expected categories to be normalized to empty slice")
+	}
+}

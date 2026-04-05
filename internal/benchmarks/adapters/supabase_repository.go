@@ -59,7 +59,7 @@ func (r *SupabaseRepository) ListBenchmarks(ctx context.Context, req benchmarks.
 		return benchmarkItems, nil
 	}
 
-	if err := r.attachRanks(ctx, difficultyByID, req.View == benchmarks.ListViewFull); err != nil {
+	if err := r.attachRanks(ctx, difficultyByID); err != nil {
 		return nil, err
 	}
 
@@ -212,8 +212,7 @@ func (r *SupabaseRepository) attachDifficulties(ctx context.Context, benchmarkBy
 		diff.DifficultyName = row.difficultyName
 		diff.KovaaksBenchmarkID = row.kovaaksBenchmark
 		diff.Sharecode = row.sharecode
-		diff.RankColors = nil
-		diff.Ranks = nil
+		diff.Ranks = []benchmarks.BenchmarkRank{}
 		diff.Scenarios = []benchmarks.BenchmarkScenario{}
 		diff.Categories = []benchmarks.BenchmarkCategory{}
 
@@ -228,7 +227,7 @@ func (r *SupabaseRepository) attachDifficulties(ctx context.Context, benchmarkBy
 	return out, nil
 }
 
-func (r *SupabaseRepository) attachRanks(ctx context.Context, difficultyByID map[int64]*benchmarks.BenchmarkDifficulty, includeOrdered bool) error {
+func (r *SupabaseRepository) attachRanks(ctx context.Context, difficultyByID map[int64]*benchmarks.BenchmarkDifficulty) error {
 	difficultyIDs := keysInt64(difficultyByID)
 	if len(difficultyIDs) == 0 {
 		return nil
@@ -272,18 +271,10 @@ func (r *SupabaseRepository) attachRanks(ctx context.Context, difficultyByID map
 			rankColor = "#60a5fa"
 		}
 
-		if includeOrdered {
-			difficulty.Ranks = append(difficulty.Ranks, benchmarks.BenchmarkRank{
-				Name:  rankName,
-				Color: rankColor,
-			})
-			continue
-		}
-
-		if difficulty.RankColors == nil {
-			difficulty.RankColors = map[string]string{}
-		}
-		difficulty.RankColors[rankName] = rankColor
+		difficulty.Ranks = append(difficulty.Ranks, benchmarks.BenchmarkRank{
+			Name:  rankName,
+			Color: rankColor,
+		})
 	}
 
 	return rows.Err()

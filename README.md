@@ -213,7 +213,7 @@ Supported query params:
 - `q` optional benchmark text filter (matches benchmark name or abbreviation)
 - `view` optional response mode: `full` (default) or `progress`
 	- `full`: returns the complete benchmark hierarchy including ordered `ranks` plus scenario links and rank thresholds when available
-	- `progress`: returns the same hierarchy layout used by app `benchmarks_data.json` with `rankColors` map (no scenario link arrays)
+	- `progress`: returns the same hierarchy layout used by app `benchmarks_data.json` with ordered `ranks` (no scenario link arrays)
 
 Response:
 
