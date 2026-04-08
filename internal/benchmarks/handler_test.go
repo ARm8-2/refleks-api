@@ -22,6 +22,12 @@ func TestHandlerHandleList_OK(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
+	if cacheControl := rec.Header().Get("Cache-Control"); cacheControl != benchmarkListCacheControl {
+		t.Fatalf("expected cache-control %q, got %q", benchmarkListCacheControl, cacheControl)
+	}
+	if etag := rec.Header().Get("ETag"); etag == "" {
+		t.Fatalf("expected etag header to be set")
+	}
 	if repo.last.Query != "vt" {
 		t.Fatalf("expected trimmed query, got %q", repo.last.Query)
 	}
@@ -35,6 +41,59 @@ func TestHandlerHandleList_OK(t *testing.T) {
 	}
 	if body.Count != 1 {
 		t.Fatalf("expected count=1, got %d", body.Count)
+	}
+}
+
+func TestHandlerHandleList_ConditionalRequestReturnsNotModified(t *testing.T) {
+	t.Parallel()
+
+	repo := &testRepo{items: []Benchmark{{BenchmarkName: "Voltaic"}}}
+	h := NewHandler(NewService(repo))
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/v1/benchmarks", nil)
+	firstRec := httptest.NewRecorder()
+
+	h.HandleList(firstRec, firstReq)
+
+	etag := firstRec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatalf("expected etag on initial response")
+	}
+
+	conditionalReq := httptest.NewRequest(http.MethodGet, "/v1/benchmarks", nil)
+	conditionalReq.Header.Set("If-None-Match", etag)
+	conditionalRec := httptest.NewRecorder()
+
+	h.HandleList(conditionalRec, conditionalReq)
+
+	if conditionalRec.Code != http.StatusNotModified {
+		t.Fatalf("expected status 304, got %d", conditionalRec.Code)
+	}
+	if body := conditionalRec.Body.String(); body != "" {
+		t.Fatalf("expected empty body for 304 response, got %q", body)
+	}
+	if got := conditionalRec.Header().Get("ETag"); got != etag {
+		t.Fatalf("expected etag %q on 304 response, got %q", etag, got)
+	}
+}
+
+func TestHandlerHandleList_ConditionalRequestIgnoresMismatchedETag(t *testing.T) {
+	t.Parallel()
+
+	repo := &testRepo{items: []Benchmark{{BenchmarkName: "Voltaic"}}}
+	h := NewHandler(NewService(repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/benchmarks", nil)
+	req.Header.Set("If-None-Match", `"different"`)
+	rec := httptest.NewRecorder()
+
+	h.HandleList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if etag := rec.Header().Get("ETag"); etag == `"different"` {
+		t.Fatalf("expected a fresh etag, got %q", etag)
 	}
 }
 

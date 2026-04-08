@@ -215,6 +215,8 @@ Supported query params:
 	- `full`: returns the complete benchmark hierarchy including ordered `ranks` plus scenario links and rank thresholds when available
 	- `progress`: returns the same hierarchy layout used by app `benchmarks_data.json` with ordered `ranks` (no scenario link arrays)
 
+Responses include an `ETag`; clients should send `If-None-Match` on repeat requests to receive `304 Not Modified` when the benchmark payload has not changed.
+
 Response:
 
 ```json
