@@ -71,19 +71,24 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 	parsedFileName := ensureRunFileExtension(parsed.FileName)
 
 	hash := sha256Hex(raw)
+	statsHash := parsed.StatsHash
+	sizeBytes := int64(len(raw))
 	existing, err := s.repo.ExistingHashes(ctx, []string{hash})
 	if err != nil {
 		return SyncResult{}, fmt.Errorf("query existing hash: %w", err)
 	}
 	if _, ok := existing[hash]; ok {
-		return SyncResult{
-			Hash:           hash,
-			AlreadyPresent: true,
-			Stored:         false,
-			FileName:       parsedFileName,
-			EpochMilli:     parsed.EpochMilli,
-			SizeBytes:      int64(len(raw)),
-		}, nil
+		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
+	}
+
+	if statsHash != "" {
+		existingStatsHashes, err := s.repo.ExistingStatsHashes(ctx, []string{statsHash})
+		if err != nil {
+			return SyncResult{}, fmt.Errorf("query existing stats hash: %w", err)
+		}
+		if _, ok := existingStatsHashes[statsHash]; ok {
+			return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
+		}
 	}
 
 	uploadedAt := s.now().UTC()
@@ -94,12 +99,13 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 
 	meta := RunMetadata{
 		Hash:          hash,
+		StatsHash:     statsHash,
 		FileName:      parsedFileName,
 		ScenarioName:  strings.TrimSpace(parsed.ScenarioName),
 		SteamID:       strings.TrimSpace(parsed.SteamID),
 		SteamUsername: strings.TrimSpace(parsed.SteamUsername),
 		EpochMilli:    parsed.EpochMilli,
-		SizeBytes:     int64(len(raw)),
+		SizeBytes:     sizeBytes,
 		ObjectKey:     objectKey,
 		UploadedAt:    uploadedAt,
 		FormatVersion: parsed.FormatVersion,
@@ -121,14 +127,8 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 	}
 
 	if !inserted {
-		return SyncResult{
-			Hash:           hash,
-			AlreadyPresent: true,
-			Stored:         false,
-			FileName:       parsedFileName,
-			EpochMilli:     parsed.EpochMilli,
-			SizeBytes:      int64(len(raw)),
-		}, nil
+		_ = s.store.Delete(ctx, objectKey)
+		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
 	}
 
 	return SyncResult{
@@ -137,8 +137,19 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		Stored:         true,
 		FileName:       parsedFileName,
 		EpochMilli:     parsed.EpochMilli,
-		SizeBytes:      int64(len(raw)),
+		SizeBytes:      sizeBytes,
 	}, nil
+}
+
+func duplicateSyncResult(hash, fileName string, epochMilli, sizeBytes int64) SyncResult {
+	return SyncResult{
+		Hash:           hash,
+		AlreadyPresent: true,
+		Stored:         false,
+		FileName:       fileName,
+		EpochMilli:     epochMilli,
+		SizeBytes:      sizeBytes,
+	}
 }
 
 // MissingHashes returns hashes that do not exist.

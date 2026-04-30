@@ -374,6 +374,8 @@ Run sync endpoints are intentionally public for desktop ingestion. No auth heade
 
 Run files use the canonical `.refleks` extension. The API normalizes filenames to keep the extension attached on storage and download responses.
 
+Uploads are deduplicated first by the API's SHA-256 of the full raw `.refleks` file and then, when present, by the embedded Kovaaks stats `Hash` value.
+
 ### Sync One
 
 Request:
@@ -587,7 +589,7 @@ Environment variables:
 - `RUNSYNC_MAX_BULK_BYTES` (default: `262144000`)
 - `RUNSYNC_MAX_MISSING_HASHES` (default: `1000`)
 
-When `RUNSYNC_ENABLED=true`, the API expects `accounts`, `scenarios`, and `runs` tables/indexes to already exist (for example created by a separate worker or migration container).
+When `RUNSYNC_ENABLED=true`, the API expects `accounts`, `scenarios`, and `runs` tables/indexes to already exist, including the `runs.stats_hash` column and unique index used for duplicate detection (for example created by a separate worker or migration container).
 
 When benchmark/leaderboard endpoints are enabled (`SUPABASE_DB_URL` is set), the API expects benchmark and leaderboard tables to exist (for example created by a separate worker or migration container).
 

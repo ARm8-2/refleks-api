@@ -10,6 +10,7 @@ const (
 // RunMetadata stores normalized metadata for one uploaded .refleks file.
 type RunMetadata struct {
 	Hash          string
+	StatsHash     string
 	FileName      string
 	ScenarioName  string
 	SteamID       string
@@ -44,6 +45,7 @@ type SyncResult struct {
 type ParsedRefleksFile struct {
 	FileName      string
 	ScenarioName  string
+	StatsHash     string
 	SteamID       string
 	SteamUsername string
 	EpochMilli    int64

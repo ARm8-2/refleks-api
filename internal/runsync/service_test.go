@@ -33,9 +33,32 @@ func (m *memRepo) ExistingHashes(_ context.Context, hashes []string) (map[string
 	return found, nil
 }
 
+func (m *memRepo) ExistingStatsHashes(_ context.Context, hashes []string) (map[string]struct{}, error) {
+	found := make(map[string]struct{})
+	for _, hash := range hashes {
+		if hash == "" {
+			continue
+		}
+		for _, meta := range m.runs {
+			if meta.StatsHash == hash {
+				found[hash] = struct{}{}
+				break
+			}
+		}
+	}
+	return found, nil
+}
+
 func (m *memRepo) InsertRun(_ context.Context, meta RunMetadata) (bool, error) {
 	if _, exists := m.runs[meta.Hash]; exists {
 		return false, nil
+	}
+	if meta.StatsHash != "" {
+		for _, existing := range m.runs {
+			if existing.StatsHash == meta.StatsHash {
+				return false, nil
+			}
+		}
 	}
 	m.runs[meta.Hash] = meta
 	return true, nil
@@ -241,6 +264,62 @@ func TestServiceSyncOne_DeduplicatesByHash(t *testing.T) {
 	}
 }
 
+func TestServiceSyncOne_DeduplicatesByStatsHash(t *testing.T) {
+	t.Parallel()
+
+	repo := newMemRepo()
+	store := newMemStore()
+	svc := NewService(repo, store, "runs")
+	svc.now = func() time.Time {
+		return time.Date(2026, 3, 22, 12, 0, 0, 0, time.UTC)
+	}
+
+	statsHash := "37975ba4bbbd5f9c593e7dbd72794baa"
+	rawOne := buildTestRefleksFileWithStats(t, "sample-one.refleks", 1742640000000, []testStatEntry{{
+		Key:    "Hash",
+		Type:   statTypeString,
+		String: statsHash,
+	}})
+	rawTwo := buildTestRefleksFileWithStats(t, "sample-two.refleks", 1742640001000, []testStatEntry{{
+		Key:    "Hash",
+		Type:   statTypeString,
+		String: strings.ToUpper(statsHash),
+	}})
+
+	first, err := svc.SyncOne(context.Background(), rawOne)
+	if err != nil {
+		t.Fatalf("first sync failed: %v", err)
+	}
+
+	second, err := svc.SyncOne(context.Background(), rawTwo)
+	if err != nil {
+		t.Fatalf("second sync failed: %v", err)
+	}
+	if first.Hash == second.Hash {
+		t.Fatalf("expected distinct raw hashes for distinct uploads")
+	}
+	if !second.AlreadyPresent {
+		t.Fatalf("expected second sync to be already present")
+	}
+	if second.Stored {
+		t.Fatalf("expected second sync not to store object")
+	}
+	if store.puts != 1 {
+		t.Fatalf("expected exactly one object upload, got %d", store.puts)
+	}
+
+	stored, ok := repo.runs[first.Hash]
+	if !ok {
+		t.Fatalf("expected first run to be stored")
+	}
+	if stored.StatsHash != statsHash {
+		t.Fatalf("expected stored stats hash %q, got %q", statsHash, stored.StatsHash)
+	}
+	if _, ok := repo.runs[second.Hash]; ok {
+		t.Fatalf("did not expect second run metadata to be stored")
+	}
+}
+
 func TestServiceMissingHashes_ReturnsOnlyNotPersisted(t *testing.T) {
 	t.Parallel()
 
@@ -425,6 +504,56 @@ func TestServiceSyncOne_AppendsMissingFileExtension(t *testing.T) {
 	}
 }
 
+type lateConflictRepo struct{}
+
+func (lateConflictRepo) ExistingHashes(context.Context, []string) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (lateConflictRepo) ExistingStatsHashes(context.Context, []string) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (lateConflictRepo) InsertRun(context.Context, RunMetadata) (bool, error) {
+	return false, nil
+}
+
+func (lateConflictRepo) RunByHash(context.Context, string) (StoredRun, error) {
+	return StoredRun{}, ErrObjectNotFound
+}
+
+func (lateConflictRepo) ListRuns(context.Context, RunListRequest) ([]RunListItem, error) {
+	return nil, nil
+}
+
+func TestServiceSyncOne_DeletesUploadedObjectWhenInsertConflicts(t *testing.T) {
+	t.Parallel()
+
+	store := newMemStore()
+	svc := NewService(lateConflictRepo{}, store, "runs")
+
+	raw := buildTestRefleksFile(t, "sample.refleks", 1742640000000)
+	result, err := svc.SyncOne(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	if !result.AlreadyPresent || result.Stored {
+		t.Fatalf("expected duplicate result after insert conflict, got %#v", result)
+	}
+	if len(store.objects) != 0 {
+		t.Fatalf("expected uploaded object to be cleaned up, got %d objects", len(store.objects))
+	}
+}
+
+type testStatEntry struct {
+	Key    string
+	Type   uint8
+	String string
+	Int    int64
+	Float  float64
+	Bool   bool
+}
+
 func float64PtrTest(v float64) *float64 {
 	copy := v
 	return &copy
@@ -442,6 +571,10 @@ func scoreOrNegInf(v *float64) float64 {
 }
 
 func buildTestRefleksFile(t *testing.T, fileName string, epochMilli int64) []byte {
+	return buildTestRefleksFileWithStats(t, fileName, epochMilli, nil)
+}
+
+func buildTestRefleksFileWithStats(t *testing.T, fileName string, epochMilli int64, stats []testStatEntry) []byte {
 	t.Helper()
 
 	payload := new(bytes.Buffer)
@@ -456,8 +589,36 @@ func buildTestRefleksFile(t *testing.T, fileName string, epochMilli int64) []byt
 	}
 
 	writeString(fileName)
-	if err := binary.Write(payload, binary.LittleEndian, uint32(0)); err != nil { // stats
+	if err := binary.Write(payload, binary.LittleEndian, uint32(len(stats))); err != nil { // stats
 		t.Fatalf("write stats len: %v", err)
+	}
+	for _, stat := range stats {
+		writeString(stat.Key)
+		if err := binary.Write(payload, binary.LittleEndian, stat.Type); err != nil {
+			t.Fatalf("write stat type: %v", err)
+		}
+		switch stat.Type {
+		case statTypeString:
+			writeString(stat.String)
+		case statTypeInt:
+			if err := binary.Write(payload, binary.LittleEndian, stat.Int); err != nil {
+				t.Fatalf("write stat int: %v", err)
+			}
+		case statTypeFloat:
+			if err := binary.Write(payload, binary.LittleEndian, stat.Float); err != nil {
+				t.Fatalf("write stat float: %v", err)
+			}
+		case statTypeBool:
+			value := uint8(0)
+			if stat.Bool {
+				value = 1
+			}
+			if err := binary.Write(payload, binary.LittleEndian, value); err != nil {
+				t.Fatalf("write stat bool: %v", err)
+			}
+		default:
+			t.Fatalf("unsupported stat type: %d", stat.Type)
+		}
 	}
 	if err := binary.Write(payload, binary.LittleEndian, uint32(0)); err != nil { // events
 		t.Fatalf("write events rows: %v", err)
