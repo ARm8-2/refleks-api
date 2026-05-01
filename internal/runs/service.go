@@ -1,4 +1,4 @@
-package runsync
+package runs
 
 import (
 	"context"
@@ -179,6 +179,9 @@ func (s *Service) MissingHashes(ctx context.Context, hashes []string) ([]string,
 
 // DownloadRaw returns a reader for a raw .refleks file.
 func (s *Service) DownloadRaw(ctx context.Context, hash string) (RawDownload, error) {
+	if s.store == nil {
+		return RawDownload{}, fmt.Errorf("raw download not available")
+	}
 	normalized, err := normalizeSingleHash(hash)
 	if err != nil {
 		return RawDownload{}, err
@@ -238,6 +241,15 @@ func (s *Service) DownloadRawURL(ctx context.Context, hash string) (RawDownloadL
 		Access:    downloadURL.Access,
 		ExpiresAt: downloadURL.ExpiresAt,
 	}, nil
+}
+
+// GetRun returns metadata for a single run by its SHA-256 hash.
+func (s *Service) GetRun(ctx context.Context, hash string) (RunListItem, error) {
+	normalized, err := normalizeSingleHash(hash)
+	if err != nil {
+		return RunListItem{}, err
+	}
+	return s.repo.RunDetail(ctx, normalized)
 }
 
 // ListRuns returns filtered, sorted, paginated run metadata for frontend browsing.
@@ -324,13 +336,20 @@ func normalizeRunListRequest(req RunListRequest) RunListRequest {
 	}
 
 	switch out.Sort {
-	case RunsSortUploadedAtAsc, RunsSortUploadedAtDesc, RunsSortEpochAsc, RunsSortEpochDesc, RunsSortScoreAsc, RunsSortScoreDesc:
+	case RunsSortUploadedAtAsc, RunsSortUploadedAtDesc,
+		RunsSortEpochAsc, RunsSortEpochDesc,
+		RunsSortScoreAsc, RunsSortScoreDesc,
+		RunsSortAccuracyAsc, RunsSortAccuracyDesc,
+		RunsSortAvgTTKAsc, RunsSortAvgTTKDesc:
 	default:
 		out.Sort = RunsSortUploadedAtDesc
 	}
 
 	if out.MinScore != nil && out.MaxScore != nil && *out.MinScore > *out.MaxScore {
 		out.MinScore, out.MaxScore = out.MaxScore, out.MinScore
+	}
+	if out.MinAccuracy != nil && out.MaxAccuracy != nil && *out.MinAccuracy > *out.MaxAccuracy {
+		out.MinAccuracy, out.MaxAccuracy = out.MaxAccuracy, out.MinAccuracy
 	}
 	if out.FromEpoch != nil && out.ToEpoch != nil && *out.FromEpoch > *out.ToEpoch {
 		out.FromEpoch, out.ToEpoch = out.ToEpoch, out.FromEpoch

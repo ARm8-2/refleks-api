@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"refleks-api/internal/runsync"
+	"refleks-api/internal/runs"
 )
 
 // SupabaseRepository stores run metadata in Supabase Postgres.
@@ -87,9 +87,104 @@ func (r *SupabaseRepository) ExistingStatsHashes(ctx context.Context, hashes []s
 	return found, nil
 }
 
+// RunDetail returns metadata for a single run by hash, shaped as a list item.
+func (r *SupabaseRepository) RunDetail(ctx context.Context, hash string) (runs.RunListItem, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			r.hash,
+			r.file_name,
+			s.scenario_name,
+			a.steam_id,
+			a.steam_username,
+			r.epoch_milli,
+			r.uploaded_at,
+			r.size_bytes,
+			r.score,
+			r.accuracy,
+			r.avg_ttk_seconds,
+			r.duration_seconds,
+			r.sens_cm360,
+			r.has_mouse_trace,
+			r.avg_mouse_speed,
+			r.mouse_vid,
+			r.mouse_pid
+		FROM runs r
+		JOIN scenarios s ON s.id = r.scenario_id
+		LEFT JOIN accounts a ON a.id = r.account_id
+		WHERE r.hash = $1
+		LIMIT 1
+	`, hash)
+	if err != nil {
+		return runs.RunListItem{}, err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return runs.RunListItem{}, err
+		}
+		return runs.RunListItem{}, runs.ErrObjectNotFound
+	}
+
+	var item runs.RunListItem
+	var steamID sql.NullString
+	var steamUsername sql.NullString
+	var score sql.NullFloat64
+	var accuracy sql.NullFloat64
+	var avgTTK sql.NullFloat64
+	var duration sql.NullFloat64
+	var sens sql.NullFloat64
+	var avgSpeed sql.NullFloat64
+	var mouseVID sql.NullString
+	var mousePID sql.NullString
+
+	if err := rows.Scan(
+		&item.Hash,
+		&item.FileName,
+		&item.ScenarioName,
+		&steamID,
+		&steamUsername,
+		&item.EpochMilli,
+		&item.UploadedAt,
+		&item.SizeBytes,
+		&score,
+		&accuracy,
+		&avgTTK,
+		&duration,
+		&sens,
+		&item.HasMouseTrace,
+		&avgSpeed,
+		&mouseVID,
+		&mousePID,
+	); err != nil {
+		return runs.RunListItem{}, err
+	}
+
+	if steamID.Valid {
+		item.SteamID = steamID.String
+	}
+	if steamUsername.Valid {
+		item.SteamUsername = steamUsername.String
+	}
+	item.Score = nullFloatPtr(score)
+	item.Accuracy = nullFloatPtr(accuracy)
+	item.AvgTTKSeconds = nullFloatPtr(avgTTK)
+	item.DurationSecs = nullFloatPtr(duration)
+	item.SensCM360 = nullFloatPtr(sens)
+	item.AvgMouseSpeed = nullFloatPtr(avgSpeed)
+	if mouseVID.Valid {
+		item.MouseVID = mouseVID.String
+	}
+	if mousePID.Valid {
+		item.MousePID = mousePID.String
+	}
+
+	return item, rows.Err()
+}
+
 // RunByHash returns one persisted run lookup by hash.
-func (r *SupabaseRepository) RunByHash(ctx context.Context, hash string) (runsync.StoredRun, error) {
-	var run runsync.StoredRun
+func (r *SupabaseRepository) RunByHash(ctx context.Context, hash string) (runs.StoredRun, error) {
+	var run runs.StoredRun
 	err := r.pool.QueryRow(ctx,
 		`SELECT object_key, file_name FROM runs WHERE hash = $1 LIMIT 1`,
 		hash,
@@ -98,13 +193,13 @@ func (r *SupabaseRepository) RunByHash(ctx context.Context, hash string) (runsyn
 		return run, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		return runsync.StoredRun{}, runsync.ErrObjectNotFound
+		return runs.StoredRun{}, runs.ErrObjectNotFound
 	}
-	return runsync.StoredRun{}, err
+	return runs.StoredRun{}, err
 }
 
 // ListRuns returns filtered/sorted run rows for frontend browse pages.
-func (r *SupabaseRepository) ListRuns(ctx context.Context, req runsync.RunListRequest) ([]runsync.RunListItem, error) {
+func (r *SupabaseRepository) ListRuns(ctx context.Context, req runs.RunListRequest) ([]runs.RunListItem, error) {
 	clauses := make([]string, 0, 8)
 	args := make([]any, 0, 10)
 
@@ -113,6 +208,9 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runsync.RunListRe
 		clauses = append(clauses, fmt.Sprintf(expr, len(args)))
 	}
 
+	if req.ScenarioID > 0 {
+		addArgClause("r.scenario_id = $%d", req.ScenarioID)
+	}
 	if req.ScenarioName != "" {
 		addArgClause("s.scenario_name ILIKE $%d", "%"+req.ScenarioName+"%")
 	}
@@ -126,7 +224,7 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runsync.RunListRe
 		args = append(args, "%"+req.Query+"%")
 		p := len(args)
 		clauses = append(clauses,
-			fmt.Sprintf("(r.file_name ILIKE $%d OR s.scenario_name ILIKE $%d OR COALESCE(a.steam_username, '') ILIKE $%d)", p, p, p),
+			fmt.Sprintf("(r.file_name ILIKE $%d OR s.scenario_name ILIKE $%d OR COALESCE(a.steam_username, '') ILIKE $%d OR COALESCE(a.steam_id, '') ILIKE $%d)", p, p, p, p),
 		)
 	}
 	if req.HasMouseTrace != nil {
@@ -137,6 +235,12 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runsync.RunListRe
 	}
 	if req.MaxScore != nil {
 		addArgClause("r.score <= $%d", *req.MaxScore)
+	}
+	if req.MinAccuracy != nil {
+		addArgClause("r.accuracy >= $%d", *req.MinAccuracy)
+	}
+	if req.MaxAccuracy != nil {
+		addArgClause("r.accuracy <= $%d", *req.MaxAccuracy)
 	}
 	if req.FromEpoch != nil {
 		addArgClause("r.epoch_milli >= $%d", *req.FromEpoch)
@@ -189,9 +293,9 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runsync.RunListRe
 	}
 	defer rows.Close()
 
-	out := make([]runsync.RunListItem, 0, req.Limit)
+	out := make([]runs.RunListItem, 0, req.Limit)
 	for rows.Next() {
-		var item runsync.RunListItem
+		var item runs.RunListItem
 		var steamID sql.NullString
 		var steamUsername sql.NullString
 		var score sql.NullFloat64
@@ -254,7 +358,7 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runsync.RunListRe
 }
 
 // InsertRun inserts run metadata. It returns false when the row already exists.
-func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runsync.RunMetadata) (bool, error) {
+func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runs.RunMetadata) (bool, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return false, err
@@ -338,7 +442,7 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runsync.RunMeta
 	return true, nil
 }
 
-func ensureAccount(ctx context.Context, tx pgx.Tx, meta runsync.RunMetadata) (*int64, error) {
+func ensureAccount(ctx context.Context, tx pgx.Tx, meta runs.RunMetadata) (*int64, error) {
 	steamID := strings.TrimSpace(meta.SteamID)
 	if steamID == "" {
 		return nil, nil
@@ -395,18 +499,26 @@ func nullFloatPtr(v sql.NullFloat64) *float64 {
 	return &copy
 }
 
-func runsOrderBySQL(sort runsync.RunsSort) string {
+func runsOrderBySQL(sort runs.RunsSort) string {
 	switch sort {
-	case runsync.RunsSortUploadedAtAsc:
+	case runs.RunsSortUploadedAtAsc:
 		return "r.uploaded_at ASC, r.id ASC"
-	case runsync.RunsSortEpochDesc:
+	case runs.RunsSortEpochDesc:
 		return "r.epoch_milli DESC, r.id DESC"
-	case runsync.RunsSortEpochAsc:
+	case runs.RunsSortEpochAsc:
 		return "r.epoch_milli ASC, r.id ASC"
-	case runsync.RunsSortScoreDesc:
+	case runs.RunsSortScoreDesc:
 		return "r.score DESC NULLS LAST, r.id DESC"
-	case runsync.RunsSortScoreAsc:
+	case runs.RunsSortScoreAsc:
 		return "r.score ASC NULLS LAST, r.id ASC"
+	case runs.RunsSortAccuracyDesc:
+		return "r.accuracy DESC NULLS LAST, r.id DESC"
+	case runs.RunsSortAccuracyAsc:
+		return "r.accuracy ASC NULLS LAST, r.id ASC"
+	case runs.RunsSortAvgTTKDesc:
+		return "r.avg_ttk_seconds DESC NULLS LAST, r.id DESC"
+	case runs.RunsSortAvgTTKAsc:
+		return "r.avg_ttk_seconds ASC NULLS LAST, r.id ASC"
 	default:
 		return "r.uploaded_at DESC, r.id DESC"
 	}

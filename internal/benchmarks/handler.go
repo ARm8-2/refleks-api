@@ -106,8 +106,10 @@ func etagMatches(ifNoneMatch, currentETag string) bool {
 		if candidate == "" {
 			continue
 		}
+		// RFC 7232 §3.2: "*" in If-None-Match must not match for GET/HEAD
+		// (it only has meaning for unsafe methods like PUT).
 		if candidate == "*" {
-			return true
+			continue
 		}
 		if normalizeETag(candidate) == normalizeETag(currentETag) {
 			return true

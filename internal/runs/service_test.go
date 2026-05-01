@@ -1,4 +1,4 @@
-package runsync
+package runs
 
 import (
 	"bytes"
@@ -62,6 +62,32 @@ func (m *memRepo) InsertRun(_ context.Context, meta RunMetadata) (bool, error) {
 	}
 	m.runs[meta.Hash] = meta
 	return true, nil
+}
+
+func (m *memRepo) RunDetail(_ context.Context, hash string) (RunListItem, error) {
+	meta, ok := m.runs[hash]
+	if !ok {
+		return RunListItem{}, ErrObjectNotFound
+	}
+	return RunListItem{
+		Hash:          meta.Hash,
+		FileName:      meta.FileName,
+		ScenarioName:  meta.ScenarioName,
+		SteamID:       meta.SteamID,
+		SteamUsername: meta.SteamUsername,
+		EpochMilli:    meta.EpochMilli,
+		UploadedAt:    meta.UploadedAt,
+		SizeBytes:     meta.SizeBytes,
+		Score:         meta.Score,
+		Accuracy:      meta.Accuracy,
+		AvgTTKSeconds: meta.AvgTTKSeconds,
+		DurationSecs:  meta.DurationSecs,
+		SensCM360:     meta.SensCM360,
+		HasMouseTrace: meta.HasMouseTrace,
+		AvgMouseSpeed: meta.AvgMouseSpeed,
+		MouseVID:      meta.MouseVID,
+		MousePID:      meta.MousePID,
+	}, nil
 }
 
 func (m *memRepo) RunByHash(_ context.Context, hash string) (StoredRun, error) {
@@ -522,6 +548,10 @@ func (lateConflictRepo) RunByHash(context.Context, string) (StoredRun, error) {
 	return StoredRun{}, ErrObjectNotFound
 }
 
+func (lateConflictRepo) RunDetail(context.Context, string) (RunListItem, error) {
+	return RunListItem{}, ErrObjectNotFound
+}
+
 func (lateConflictRepo) ListRuns(context.Context, RunListRequest) ([]RunListItem, error) {
 	return nil, nil
 }
@@ -552,6 +582,51 @@ type testStatEntry struct {
 	Int    int64
 	Float  float64
 	Bool   bool
+}
+
+func TestServiceGetRun_Success(t *testing.T) {
+	t.Parallel()
+
+	repo := newMemRepo()
+	store := newMemStore()
+	svc := NewService(repo, store, "runs")
+
+	raw := buildTestRefleksFile(t, "detail.refleks", 1742640000000)
+	synced, err := svc.SyncOne(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	run, err := svc.GetRun(context.Background(), synced.Hash)
+	if err != nil {
+		t.Fatalf("get run failed: %v", err)
+	}
+	if run.Hash != synced.Hash {
+		t.Fatalf("expected hash %s, got %s", synced.Hash, run.Hash)
+	}
+	if run.FileName != synced.FileName {
+		t.Fatalf("expected file name %s, got %s", synced.FileName, run.FileName)
+	}
+}
+
+func TestServiceGetRun_NotFound(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	_, err := svc.GetRun(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+}
+
+func TestServiceGetRun_InvalidHash(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	_, err := svc.GetRun(context.Background(), "not-a-hash")
+	if !errors.Is(err, ErrInvalidHash) {
+		t.Fatalf("expected ErrInvalidHash, got %v", err)
+	}
 }
 
 func float64PtrTest(v float64) *float64 {

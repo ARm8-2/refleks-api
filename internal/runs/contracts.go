@@ -1,4 +1,4 @@
-package runsync
+package runs
 
 import (
 	"context"
@@ -22,6 +22,7 @@ type Repository interface {
 	ExistingStatsHashes(ctx context.Context, hashes []string) (map[string]struct{}, error)
 	InsertRun(ctx context.Context, meta RunMetadata) (bool, error)
 	RunByHash(ctx context.Context, hash string) (StoredRun, error)
+	RunDetail(ctx context.Context, hash string) (RunListItem, error)
 	ListRuns(ctx context.Context, req RunListRequest) ([]RunListItem, error)
 }
 

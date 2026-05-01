@@ -1,4 +1,4 @@
-package runsync
+package runs
 
 import (
 	"encoding/json"
@@ -182,6 +182,22 @@ func (h *Handler) HandleMissingHashes(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleGetRun returns metadata for a single run by its hash.
+func (h *Handler) HandleGetRun(w http.ResponseWriter, r *http.Request) {
+	hash := strings.TrimSpace(r.PathValue("hash"))
+	if hash == "" {
+		hash = strings.TrimSpace(r.URL.Query().Get("hash"))
+	}
+
+	run, err := h.service.GetRun(r.Context(), hash)
+	if err != nil {
+		h.writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, run)
+}
+
 // HandleDownloadRaw streams one raw .refleks file from object storage.
 func (h *Handler) HandleDownloadRaw(w http.ResponseWriter, r *http.Request) {
 	hash := strings.TrimSpace(r.PathValue("hash"))
@@ -263,6 +279,16 @@ func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "max_score must be a number")
 		return
 	}
+	minAccuracy, err := optionalFloat64Query(q.Get("min_accuracy"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "min_accuracy must be a number")
+		return
+	}
+	maxAccuracy, err := optionalFloat64Query(q.Get("max_accuracy"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "max_accuracy must be a number")
+		return
+	}
 	fromEpoch, err := optionalInt64Query(q.Get("from_epoch"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "from_epoch must be an integer")
@@ -278,11 +304,22 @@ func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "has_mouse_trace must be true or false")
 		return
 	}
+	scenarioID, err := optionalInt64Query(q.Get("scenario_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "scenario_id must be an integer")
+		return
+	}
+
+	var scenarioIDVal int64
+	if scenarioID != nil {
+		scenarioIDVal = *scenarioID
+	}
 
 	resp, err := h.service.ListRuns(r.Context(), RunListRequest{
 		Limit:         limit,
 		Offset:        offset,
 		Sort:          RunsSort(strings.TrimSpace(q.Get("sort"))),
+		ScenarioID:    scenarioIDVal,
 		ScenarioName:  strings.TrimSpace(q.Get("scenario")),
 		SteamID:       strings.TrimSpace(q.Get("steam_id")),
 		SteamUsername: strings.TrimSpace(q.Get("steam_username")),
@@ -290,6 +327,8 @@ func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 		HasMouseTrace: hasMouseTrace,
 		MinScore:      minScore,
 		MaxScore:      maxScore,
+		MinAccuracy:   minAccuracy,
+		MaxAccuracy:   maxAccuracy,
 		FromEpoch:     fromEpoch,
 		ToEpoch:       toEpoch,
 	})

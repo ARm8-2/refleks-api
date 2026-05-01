@@ -18,8 +18,12 @@ import (
 	"refleks-api/internal/httpserver"
 	"refleks-api/internal/leaderboards"
 	leaderboardadapters "refleks-api/internal/leaderboards/adapters"
-	"refleks-api/internal/runsync"
-	"refleks-api/internal/runsync/adapters"
+	"refleks-api/internal/players"
+	playeradapters "refleks-api/internal/players/adapters"
+	"refleks-api/internal/runs"
+	runadapters "refleks-api/internal/runs/adapters"
+	"refleks-api/internal/scenarios"
+	scenarioadapters "refleks-api/internal/scenarios/adapters"
 	"refleks-api/internal/status"
 	"refleks-api/internal/supabase"
 )
@@ -95,49 +99,91 @@ func run() error {
 		logger.Warn("benchmark and leaderboard endpoints disabled: SUPABASE_DB_URL is empty")
 	}
 
-	var runSyncRoutes *httpapi.RunSyncRoutes
-	if cfg.RunSyncEnabled {
-		repo, err := adapters.NewSupabaseRepository(supabaseClient.Pool())
+	var runRoutes *httpapi.RunRoutes
+	var scenarioRoutes *httpapi.ScenarioRoutes
+	var playerRoutes *httpapi.PlayerRoutes
+	if supabaseClient != nil {
+		runRepo, err := runadapters.NewSupabaseRepository(supabaseClient.Pool())
 		if err != nil {
-			return fmt.Errorf("init supabase repository: %w", err)
+			return fmt.Errorf("init run repository: %w", err)
+		}
+		// Read-only run service: store is not needed for browse/get endpoints.
+		readSvc := runs.NewService(runRepo, nil, "")
+		readHandler := runs.NewHandler(readSvc, runs.HandlerConfig{})
+		runRoutes = &httpapi.RunRoutes{
+			RunsList: http.HandlerFunc(readHandler.HandleListRuns),
+			GetRun:   http.HandlerFunc(readHandler.HandleGetRun),
 		}
 
-		store, err := adapters.NewR2Store(context.Background(), adapters.R2Config{
-			Endpoint:        cfg.R2Endpoint,
-			Region:          cfg.R2Region,
-			Bucket:          cfg.R2RawPublicBucket,
-			PublicBaseURL:   cfg.R2RawPublicBaseURL,
-			SignedURLTTL:    cfg.R2SignedURLTTL,
-			AccessKeyID:     cfg.R2AccessKeyID,
-			SecretAccessKey: cfg.R2SecretAccessKey,
-		})
+		hasR2Config := cfg.R2Endpoint != "" && cfg.R2RawPublicBucket != "" && cfg.R2AccessKeyID != "" && cfg.R2SecretAccessKey != ""
+		if hasR2Config {
+			store, err := runadapters.NewR2Store(context.Background(), runadapters.R2Config{
+				Endpoint:        cfg.R2Endpoint,
+				Region:          cfg.R2Region,
+				Bucket:          cfg.R2RawPublicBucket,
+				PublicBaseURL:   cfg.R2RawPublicBaseURL,
+				SignedURLTTL:    cfg.R2SignedURLTTL,
+				AccessKeyID:     cfg.R2AccessKeyID,
+				SecretAccessKey: cfg.R2SecretAccessKey,
+			})
+			if err != nil {
+				return fmt.Errorf("init r2 store: %w", err)
+			}
+
+			storeSvc := runs.NewService(runRepo, store, cfg.R2KeyPrefix)
+			storeHandler := runs.NewHandler(storeSvc, runs.HandlerConfig{
+				MaxSingleFileBytes: cfg.RunSyncMaxFileBytes,
+				MaxBulkFileCount:   cfg.RunSyncMaxBulkFiles,
+				MaxBulkTotalBytes:  cfg.RunSyncMaxBulkBytes,
+				MaxMissingHashes:   cfg.RunSyncMaxMissingHashes,
+			})
+			runRoutes.RawDownload = http.HandlerFunc(storeHandler.HandleDownloadRaw)
+			runRoutes.RawURL = http.HandlerFunc(storeHandler.HandleDownloadRawURL)
+
+			if cfg.RunSyncEnabled {
+				runRoutes.Sync = http.HandlerFunc(storeHandler.HandleSync)
+				runRoutes.BulkSync = http.HandlerFunc(storeHandler.HandleBulkSync)
+				runRoutes.MissingHashes = http.HandlerFunc(storeHandler.HandleMissingHashes)
+				logger.Info("run sync enabled")
+			} else {
+				logger.Info("run sync disabled: upload endpoints inactive")
+			}
+
+			logger.Info("run raw download endpoints enabled")
+		} else if cfg.RunSyncEnabled {
+			return fmt.Errorf("R2 endpoint, bucket, and credentials are required when RUNSYNC_ENABLED=true")
+		} else {
+			logger.Warn("run raw download endpoints disabled: R2 configuration is incomplete")
+		}
+
+		scenarioRepo, err := scenarioadapters.NewSupabaseRepository(supabaseClient.Pool())
 		if err != nil {
-			return fmt.Errorf("init r2 store: %w", err)
+			return fmt.Errorf("init scenario repository: %w", err)
+		}
+		scenarioSvc := scenarios.NewService(scenarioRepo)
+		scenarioHandler := scenarios.NewHandler(scenarioSvc)
+		scenarioRoutes = &httpapi.ScenarioRoutes{
+			List: http.HandlerFunc(scenarioHandler.HandleList),
+			Get:  http.HandlerFunc(scenarioHandler.HandleGet),
 		}
 
-		svc := runsync.NewService(repo, store, cfg.R2KeyPrefix)
-		h := runsync.NewHandler(svc, runsync.HandlerConfig{
-			MaxSingleFileBytes: cfg.RunSyncMaxFileBytes,
-			MaxBulkFileCount:   cfg.RunSyncMaxBulkFiles,
-			MaxBulkTotalBytes:  cfg.RunSyncMaxBulkBytes,
-			MaxMissingHashes:   cfg.RunSyncMaxMissingHashes,
-		})
-
-		runSyncRoutes = &httpapi.RunSyncRoutes{
-			RunsList:      http.HandlerFunc(h.HandleListRuns),
-			Sync:          http.HandlerFunc(h.HandleSync),
-			BulkSync:      http.HandlerFunc(h.HandleBulkSync),
-			MissingHashes: http.HandlerFunc(h.HandleMissingHashes),
-			RawDownload:   http.HandlerFunc(h.HandleDownloadRaw),
-			RawURL:        http.HandlerFunc(h.HandleDownloadRawURL),
+		playerRepo, err := playeradapters.NewSupabaseRepository(supabaseClient.Pool())
+		if err != nil {
+			return fmt.Errorf("init player repository: %w", err)
+		}
+		playerSvc := players.NewService(playerRepo)
+		playerHandler := players.NewHandler(playerSvc)
+		playerRoutes = &httpapi.PlayerRoutes{
+			List: http.HandlerFunc(playerHandler.HandleList),
+			Get:  http.HandlerFunc(playerHandler.HandleGet),
 		}
 
-		logger.Info("run sync enabled")
+		logger.Info("run, scenario, and player read endpoints enabled")
 	} else {
-		logger.Warn("run sync disabled")
+		logger.Warn("run, scenario, and player endpoints disabled: SUPABASE_DB_URL is empty")
 	}
 
-	router := httpapi.NewRouter(logger, status.NewHandler(statusService), authRoutes, benchmarkRoutes, leaderboardRoutes, runSyncRoutes)
+	router := httpapi.NewRouter(logger, status.NewHandler(statusService), authRoutes, benchmarkRoutes, leaderboardRoutes, scenarioRoutes, playerRoutes, runRoutes)
 	server := httpserver.New(cfg, logger, router)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

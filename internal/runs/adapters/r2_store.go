@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
 
-	"refleks-api/internal/runsync"
+	"refleks-api/internal/runs"
 )
 
 const defaultSignedURLTTL = 15 * time.Minute
@@ -115,7 +115,7 @@ func (s *R2Store) Get(ctx context.Context, objectKey string) (io.ReadCloser, int
 	})
 	if err != nil {
 		if isObjectNotFoundError(err) {
-			return nil, 0, runsync.ErrObjectNotFound
+			return nil, 0, runs.ErrObjectNotFound
 		}
 		return nil, 0, err
 	}
@@ -129,17 +129,17 @@ func (s *R2Store) Get(ctx context.Context, objectKey string) (io.ReadCloser, int
 }
 
 // GetDownloadURL returns either a public URL or signed URL for an object.
-func (s *R2Store) GetDownloadURL(ctx context.Context, objectKey, fileName string) (runsync.DownloadURL, error) {
+func (s *R2Store) GetDownloadURL(ctx context.Context, objectKey, fileName string) (runs.DownloadURL, error) {
 	if err := s.ensureObjectExists(ctx, objectKey); err != nil {
-		return runsync.DownloadURL{}, err
+		return runs.DownloadURL{}, err
 	}
 
 	if s.publicBaseURL != "" {
 		publicURL, err := buildPublicObjectURL(s.publicBaseURL, objectKey)
 		if err != nil {
-			return runsync.DownloadURL{}, err
+			return runs.DownloadURL{}, err
 		}
-		return runsync.DownloadURL{
+		return runs.DownloadURL{
 			URL:    publicURL,
 			Access: "public",
 		}, nil
@@ -154,11 +154,11 @@ func (s *R2Store) GetDownloadURL(ctx context.Context, objectKey, fileName string
 
 	presigned, err := s.presignClient.PresignGetObject(ctx, in, s3.WithPresignExpires(s.signedURLTTL))
 	if err != nil {
-		return runsync.DownloadURL{}, err
+		return runs.DownloadURL{}, err
 	}
 	expiresAt := time.Now().UTC().Add(s.signedURLTTL)
 
-	return runsync.DownloadURL{
+	return runs.DownloadURL{
 		URL:       presigned.URL,
 		Access:    "signed",
 		ExpiresAt: &expiresAt,
@@ -186,7 +186,7 @@ func (s *R2Store) ensureObjectExists(ctx context.Context, objectKey string) erro
 		return nil
 	}
 	if isObjectNotFoundError(err) {
-		return runsync.ErrObjectNotFound
+		return runs.ErrObjectNotFound
 	}
 	return err
 }

@@ -1,4 +1,4 @@
-package runsync
+package runs
 
 import (
 	"bytes"
