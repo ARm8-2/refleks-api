@@ -22,9 +22,22 @@ type LeaderboardRoutes struct {
 	BenchmarkDifficulty http.Handler
 }
 
-// RunSyncRoutes bundles optional run sync handlers.
-type RunSyncRoutes struct {
+// ScenarioRoutes bundles optional scenario browsing handlers.
+type ScenarioRoutes struct {
+	List http.Handler
+	Get  http.Handler
+}
+
+// PlayerRoutes bundles optional player browsing handlers.
+type PlayerRoutes struct {
+	List http.Handler
+	Get  http.Handler
+}
+
+// RunRoutes bundles optional run handlers.
+type RunRoutes struct {
 	RunsList      http.Handler
+	GetRun        http.Handler
 	Sync          http.Handler
 	BulkSync      http.Handler
 	MissingHashes http.Handler
@@ -33,7 +46,7 @@ type RunSyncRoutes struct {
 }
 
 // NewRouter configures API routes and middleware.
-func NewRouter(logger *slog.Logger, statusHandler http.Handler, authRoutes *AuthRoutes, benchmarkRoutes *BenchmarkRoutes, leaderboardRoutes *LeaderboardRoutes, runSyncRoutes *RunSyncRoutes) http.Handler {
+func NewRouter(logger *slog.Logger, statusHandler http.Handler, authRoutes *AuthRoutes, benchmarkRoutes *BenchmarkRoutes, leaderboardRoutes *LeaderboardRoutes, scenarioRoutes *ScenarioRoutes, playerRoutes *PlayerRoutes, runRoutes *RunRoutes) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/status", statusHandler)
 	if authRoutes != nil {
@@ -57,24 +70,43 @@ func NewRouter(logger *slog.Logger, statusHandler http.Handler, authRoutes *Auth
 			mux.Handle("GET /v1/leaderboards/benchmark-difficulty", leaderboardRoutes.BenchmarkDifficulty)
 		}
 	}
-	if runSyncRoutes != nil {
-		if runSyncRoutes.RunsList != nil {
-			mux.Handle("GET /v1/runs", runSyncRoutes.RunsList)
+	if scenarioRoutes != nil {
+		if scenarioRoutes.List != nil {
+			mux.Handle("GET /v1/scenarios", scenarioRoutes.List)
 		}
-		if runSyncRoutes.Sync != nil {
-			mux.Handle("POST /v1/runs/sync", runSyncRoutes.Sync)
+		if scenarioRoutes.Get != nil {
+			mux.Handle("GET /v1/scenarios/{id}", scenarioRoutes.Get)
 		}
-		if runSyncRoutes.BulkSync != nil {
-			mux.Handle("POST /v1/runs/sync/bulk", runSyncRoutes.BulkSync)
+	}
+	if playerRoutes != nil {
+		if playerRoutes.List != nil {
+			mux.Handle("GET /v1/players", playerRoutes.List)
 		}
-		if runSyncRoutes.MissingHashes != nil {
-			mux.Handle("POST /v1/runs/sync/missing", runSyncRoutes.MissingHashes)
+		if playerRoutes.Get != nil {
+			mux.Handle("GET /v1/players/{steam_id}", playerRoutes.Get)
 		}
-		if runSyncRoutes.RawDownload != nil {
-			mux.Handle("GET /v1/runs/raw/{hash}", runSyncRoutes.RawDownload)
+	}
+	if runRoutes != nil {
+		if runRoutes.RunsList != nil {
+			mux.Handle("GET /v1/runs", runRoutes.RunsList)
 		}
-		if runSyncRoutes.RawURL != nil {
-			mux.Handle("GET /v1/runs/raw/{hash}/url", runSyncRoutes.RawURL)
+		if runRoutes.GetRun != nil {
+			mux.Handle("GET /v1/runs/{hash}", runRoutes.GetRun)
+		}
+		if runRoutes.Sync != nil {
+			mux.Handle("POST /v1/runs/sync", runRoutes.Sync)
+		}
+		if runRoutes.BulkSync != nil {
+			mux.Handle("POST /v1/runs/sync/bulk", runRoutes.BulkSync)
+		}
+		if runRoutes.MissingHashes != nil {
+			mux.Handle("POST /v1/runs/sync/missing", runRoutes.MissingHashes)
+		}
+		if runRoutes.RawDownload != nil {
+			mux.Handle("GET /v1/runs/raw/{hash}", runRoutes.RawDownload)
+		}
+		if runRoutes.RawURL != nil {
+			mux.Handle("GET /v1/runs/raw/{hash}/url", runRoutes.RawURL)
 		}
 	}
 

@@ -1,4 +1,4 @@
-package runsync
+package runs
 
 import (
 	"context"
@@ -71,19 +71,24 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 	parsedFileName := ensureRunFileExtension(parsed.FileName)
 
 	hash := sha256Hex(raw)
+	statsHash := parsed.StatsHash
+	sizeBytes := int64(len(raw))
 	existing, err := s.repo.ExistingHashes(ctx, []string{hash})
 	if err != nil {
 		return SyncResult{}, fmt.Errorf("query existing hash: %w", err)
 	}
 	if _, ok := existing[hash]; ok {
-		return SyncResult{
-			Hash:           hash,
-			AlreadyPresent: true,
-			Stored:         false,
-			FileName:       parsedFileName,
-			EpochMilli:     parsed.EpochMilli,
-			SizeBytes:      int64(len(raw)),
-		}, nil
+		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
+	}
+
+	if statsHash != "" {
+		existingStatsHashes, err := s.repo.ExistingStatsHashes(ctx, []string{statsHash})
+		if err != nil {
+			return SyncResult{}, fmt.Errorf("query existing stats hash: %w", err)
+		}
+		if _, ok := existingStatsHashes[statsHash]; ok {
+			return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
+		}
 	}
 
 	uploadedAt := s.now().UTC()
@@ -94,12 +99,13 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 
 	meta := RunMetadata{
 		Hash:          hash,
+		StatsHash:     statsHash,
 		FileName:      parsedFileName,
 		ScenarioName:  strings.TrimSpace(parsed.ScenarioName),
 		SteamID:       strings.TrimSpace(parsed.SteamID),
 		SteamUsername: strings.TrimSpace(parsed.SteamUsername),
 		EpochMilli:    parsed.EpochMilli,
-		SizeBytes:     int64(len(raw)),
+		SizeBytes:     sizeBytes,
 		ObjectKey:     objectKey,
 		UploadedAt:    uploadedAt,
 		FormatVersion: parsed.FormatVersion,
@@ -121,14 +127,8 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 	}
 
 	if !inserted {
-		return SyncResult{
-			Hash:           hash,
-			AlreadyPresent: true,
-			Stored:         false,
-			FileName:       parsedFileName,
-			EpochMilli:     parsed.EpochMilli,
-			SizeBytes:      int64(len(raw)),
-		}, nil
+		_ = s.store.Delete(ctx, objectKey)
+		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
 	}
 
 	return SyncResult{
@@ -137,8 +137,19 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		Stored:         true,
 		FileName:       parsedFileName,
 		EpochMilli:     parsed.EpochMilli,
-		SizeBytes:      int64(len(raw)),
+		SizeBytes:      sizeBytes,
 	}, nil
+}
+
+func duplicateSyncResult(hash, fileName string, epochMilli, sizeBytes int64) SyncResult {
+	return SyncResult{
+		Hash:           hash,
+		AlreadyPresent: true,
+		Stored:         false,
+		FileName:       fileName,
+		EpochMilli:     epochMilli,
+		SizeBytes:      sizeBytes,
+	}
 }
 
 // MissingHashes returns hashes that do not exist.
@@ -168,6 +179,9 @@ func (s *Service) MissingHashes(ctx context.Context, hashes []string) ([]string,
 
 // DownloadRaw returns a reader for a raw .refleks file.
 func (s *Service) DownloadRaw(ctx context.Context, hash string) (RawDownload, error) {
+	if s.store == nil {
+		return RawDownload{}, fmt.Errorf("raw download not available")
+	}
 	normalized, err := normalizeSingleHash(hash)
 	if err != nil {
 		return RawDownload{}, err
@@ -227,6 +241,15 @@ func (s *Service) DownloadRawURL(ctx context.Context, hash string) (RawDownloadL
 		Access:    downloadURL.Access,
 		ExpiresAt: downloadURL.ExpiresAt,
 	}, nil
+}
+
+// GetRun returns metadata for a single run by its SHA-256 hash.
+func (s *Service) GetRun(ctx context.Context, hash string) (RunListItem, error) {
+	normalized, err := normalizeSingleHash(hash)
+	if err != nil {
+		return RunListItem{}, err
+	}
+	return s.repo.RunDetail(ctx, normalized)
 }
 
 // ListRuns returns filtered, sorted, paginated run metadata for frontend browsing.
@@ -313,13 +336,20 @@ func normalizeRunListRequest(req RunListRequest) RunListRequest {
 	}
 
 	switch out.Sort {
-	case RunsSortUploadedAtAsc, RunsSortUploadedAtDesc, RunsSortEpochAsc, RunsSortEpochDesc, RunsSortScoreAsc, RunsSortScoreDesc:
+	case RunsSortUploadedAtAsc, RunsSortUploadedAtDesc,
+		RunsSortEpochAsc, RunsSortEpochDesc,
+		RunsSortScoreAsc, RunsSortScoreDesc,
+		RunsSortAccuracyAsc, RunsSortAccuracyDesc,
+		RunsSortAvgTTKAsc, RunsSortAvgTTKDesc:
 	default:
 		out.Sort = RunsSortUploadedAtDesc
 	}
 
 	if out.MinScore != nil && out.MaxScore != nil && *out.MinScore > *out.MaxScore {
 		out.MinScore, out.MaxScore = out.MaxScore, out.MinScore
+	}
+	if out.MinAccuracy != nil && out.MaxAccuracy != nil && *out.MinAccuracy > *out.MaxAccuracy {
+		out.MinAccuracy, out.MaxAccuracy = out.MaxAccuracy, out.MinAccuracy
 	}
 	if out.FromEpoch != nil && out.ToEpoch != nil && *out.FromEpoch > *out.ToEpoch {
 		out.FromEpoch, out.ToEpoch = out.ToEpoch, out.FromEpoch

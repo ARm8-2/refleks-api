@@ -1,4 +1,4 @@
-package runsync
+package runs
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -35,8 +36,11 @@ const (
 	maxMousePoints   = 20000000
 )
 
+var statsHashRe = regexp.MustCompile(`^(?:[a-f0-9]{32}|[a-f0-9]{64})$`)
+
 type parsedStats struct {
 	ScenarioName  string
+	StatsHash     string
 	Score         *float64
 	Accuracy      *float64
 	AvgTTKSeconds *float64
@@ -128,6 +132,7 @@ func parsePayload(payload []byte, compression uint8) (ParsedRefleksFile, error) 
 	return ParsedRefleksFile{
 		FileName:      fileName,
 		ScenarioName:  stats.ScenarioName,
+		StatsHash:     stats.StatsHash,
 		SteamID:       env.SteamID,
 		SteamUsername: env.SteamUsername,
 		Score:         stats.Score,
@@ -197,6 +202,10 @@ func parseStats(r io.Reader) (parsedStats, error) {
 			if s, ok := value.(string); ok {
 				out.ScenarioName = strings.TrimSpace(s)
 			}
+		case "hash":
+			if s, ok := value.(string); ok {
+				out.StatsHash = normalizeStatsHash(s)
+			}
 		case "score":
 			if v, ok := asFloat64(value); ok {
 				out.Score = float64Ptr(v)
@@ -221,6 +230,14 @@ func parseStats(r io.Reader) (parsedStats, error) {
 	}
 
 	return out, nil
+}
+
+func normalizeStatsHash(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if !statsHashRe.MatchString(normalized) {
+		return ""
+	}
+	return normalized
 }
 
 func skipEvents(r io.Reader) error {

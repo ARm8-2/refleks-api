@@ -1,4 +1,4 @@
-package runsync
+package runs
 
 import "time"
 
@@ -10,6 +10,7 @@ const (
 // RunMetadata stores normalized metadata for one uploaded .refleks file.
 type RunMetadata struct {
 	Hash          string
+	StatsHash     string
 	FileName      string
 	ScenarioName  string
 	SteamID       string
@@ -44,6 +45,7 @@ type SyncResult struct {
 type ParsedRefleksFile struct {
 	FileName      string
 	ScenarioName  string
+	StatsHash     string
 	SteamID       string
 	SteamUsername string
 	EpochMilli    int64
@@ -69,6 +71,10 @@ const (
 	RunsSortEpochAsc       RunsSort = "epoch_asc"
 	RunsSortScoreDesc      RunsSort = "score_desc"
 	RunsSortScoreAsc       RunsSort = "score_asc"
+	RunsSortAccuracyDesc   RunsSort = "accuracy_desc"
+	RunsSortAccuracyAsc    RunsSort = "accuracy_asc"
+	RunsSortAvgTTKDesc     RunsSort = "avg_ttk_desc"
+	RunsSortAvgTTKAsc      RunsSort = "avg_ttk_asc"
 )
 
 // RunListRequest captures filters, sorting, and pagination for listing runs.
@@ -76,6 +82,7 @@ type RunListRequest struct {
 	Limit         int
 	Offset        int
 	Sort          RunsSort
+	ScenarioID    int64
 	ScenarioName  string
 	SteamID       string
 	SteamUsername string
@@ -83,6 +90,8 @@ type RunListRequest struct {
 	HasMouseTrace *bool
 	MinScore      *float64
 	MaxScore      *float64
+	MinAccuracy   *float64
+	MaxAccuracy   *float64
 	FromEpoch     *int64
 	ToEpoch       *int64
 }

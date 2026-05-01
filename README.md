@@ -7,8 +7,11 @@ This repository now includes:
 - Opinionated project layout for long-term maintainability.
 - Structured logging and middleware-ready HTTP stack.
 - Graceful shutdown and timeout configuration.
-- A first operational endpoint: status.
-- Run sync API for .refleks uploads and deduplication.
+- Status endpoint.
+- Run sync API for `.refleks` uploads, deduplication, browsing, and raw downloads.
+- Scenario browser (searchable, sortable, with score/sensitivity distributions).
+- Player browser (searchable, sortable, with run counts).
+- Benchmark and leaderboard read endpoints.
 - Supabase-backed metadata persistence.
 - Cloudflare R2 raw file storage.
 
@@ -44,13 +47,27 @@ This repository now includes:
 │   │   ├── handler.go
 │   │   ├── service.go
 │   │   └── types.go
-│   ├── runsync/
+│   ├── players/
+│   │   ├── adapters/
+│   │   │   └── supabase_repository.go
+│   │   ├── contracts.go
+│   │   ├── handler.go
+│   │   ├── service.go
+│   │   └── types.go
+│   ├── runs/
 │   │   ├── adapters/
 │   │   │   ├── r2_store.go
 │   │   │   └── supabase_repository.go
 │   │   ├── contracts.go
 │   │   ├── handler.go
 │   │   ├── refleks_format.go
+│   │   ├── service.go
+│   │   └── types.go
+│   ├── scenarios/
+│   │   ├── adapters/
+│   │   │   └── supabase_repository.go
+│   │   ├── contracts.go
+│   │   ├── handler.go
 │   │   ├── service.go
 │   │   └── types.go
 │   ├── supabase/
@@ -215,6 +232,8 @@ Supported query params:
 	- `full`: returns the complete benchmark hierarchy including ordered `ranks` plus scenario links and rank thresholds when available
 	- `progress`: returns the same hierarchy layout used by app `benchmarks_data.json` with ordered `ranks` (no scenario link arrays)
 
+Responses include an `ETag`; clients should send `If-None-Match` on repeat requests to receive `304 Not Modified` when the benchmark payload has not changed.
+
 Response:
 
 ```json
@@ -372,6 +391,8 @@ Run sync endpoints are intentionally public for desktop ingestion. No auth heade
 
 Run files use the canonical `.refleks` extension. The API normalizes filenames to keep the extension attached on storage and download responses.
 
+Uploads are deduplicated first by the API's SHA-256 of the full raw `.refleks` file and then, when present, by the embedded Kovaaks stats `Hash` value.
+
 ### Sync One
 
 Request:
@@ -456,16 +477,24 @@ Request:
 GET /v1/runs?limit=25&offset=0&sort=uploaded_at_desc&scenario=VT&steam_username=alice&has_mouse_trace=true
 ```
 
-Supported filters:
+Supported query params:
 
 - `limit` and `offset` for pagination
-- `sort` with `uploaded_at_desc`, `uploaded_at_asc`, `epoch_desc`, `epoch_asc`, `score_desc`, or `score_asc`
-- `scenario` for scenario name matching
-- `steam_id` and `steam_username` for account filtering
-- `q` for a general text search across filename, scenario, and Steam username
-- `has_mouse_trace` for trace presence filtering
-- `min_score` and `max_score` for score range filtering
-- `from_epoch` and `to_epoch` for epoch bounds
+- `sort` — ordering; supported values:
+  - `uploaded_at_desc` (default), `uploaded_at_asc`
+  - `epoch_desc`, `epoch_asc`
+  - `score_desc`, `score_asc`
+  - `accuracy_desc`, `accuracy_asc`
+  - `avg_ttk_desc`, `avg_ttk_asc`
+- `q` — general text search across filename, scenario name, Steam username, and Steam ID
+- `scenario_id` — filter by exact scenario ID (matches the `id` returned from scenario endpoints)
+- `scenario` — scenario name substring filter (case-insensitive)
+- `steam_id` — Steam ID substring filter
+- `steam_username` — Steam username substring filter
+- `has_mouse_trace` — `true` or `false`
+- `min_score`, `max_score` — inclusive score range
+- `min_accuracy`, `max_accuracy` — inclusive accuracy range (0–1)
+- `from_epoch`, `to_epoch` — run timestamp bounds in milliseconds
 
 Response:
 
@@ -497,6 +526,45 @@ Response:
 	"has_more": false
 }
 ```
+
+### Get Run Detail
+
+Request:
+
+```http
+GET /v1/runs/{hash}
+```
+
+Returns the full metadata card for a single run identified by its SHA-256 hash.
+
+Response:
+
+```json
+{
+	"hash": "<sha256>",
+	"file_name": "air far long strafes %70 - Challenge - 2024.12.22-19.47.47 Stats.refleks",
+	"scenario_name": "air far long strafes %70",
+	"steam_id": "76561198000000000",
+	"steam_username": "alice",
+	"epoch_milli": 1734896867000,
+	"uploaded_at": "2026-03-25T11:00:00Z",
+	"size_bytes": 123456,
+	"score": 1162.9,
+	"accuracy": 0.925,
+	"avg_ttk_seconds": 0.495745,
+	"duration_seconds": 42.08,
+	"sens_cm360": 36.48,
+	"has_mouse_trace": true,
+	"avg_mouse_speed": 1284.2,
+	"mouse_vid": "046D",
+	"mouse_pid": "C539"
+}
+```
+
+Error responses:
+
+- `400 Bad Request` when the hash is not a valid 64-character hex string
+- `404 Not Found` when no run with that hash exists
 
 ### Download Raw File
 
@@ -547,6 +615,140 @@ Response (signed fallback mode):
 }
 ```
 
+## Scenario Endpoints
+
+Scenario endpoints are read-only and are enabled when `SUPABASE_DB_URL` is configured.
+
+### Browse Scenarios
+
+Request:
+
+```http
+GET /v1/scenarios?q=VT&sort=run_count_desc&limit=50&offset=0
+```
+
+Supported query params:
+
+- `q` — optional name filter (case-insensitive substring match)
+- `sort` — `run_count_desc` (default), `run_count_asc`, `name_asc`, `name_desc`, `updated_at_desc`
+- `limit` — page size (default `50`, max `200`)
+- `offset` — pagination offset (default `0`)
+
+Response:
+
+```json
+{
+	"scenarios": [
+		{
+			"id": 42,
+			"scenario_name": "VT 1w3ts",
+			"run_count": 18432,
+			"score_sample_count": 18432,
+			"updated_at": "2026-04-28T10:00:00Z"
+		}
+	],
+	"limit": 50,
+	"offset": 0,
+	"count": 1,
+	"has_more": false
+}
+```
+
+### Get Scenario Detail
+
+Request:
+
+```http
+GET /v1/scenarios/{id}
+```
+
+Returns full metadata for one scenario including score and sensitivity distributions. Distributions are omitted when no data has been collected yet.
+
+Response:
+
+```json
+{
+	"id": 42,
+	"scenario_name": "VT 1w3ts",
+	"run_count": 18432,
+	"score_sample_count": 18432,
+	"score_distribution": {"1000-1100": 120, "1100-1200": 340},
+	"sens_sample_count": 9210,
+	"sens_distribution": {"30-40": 512, "40-50": 723},
+	"updated_at": "2026-04-28T10:00:00Z"
+}
+```
+
+Error responses:
+
+- `400 Bad Request` when the id is not a valid integer
+- `404 Not Found` when no scenario with that id exists
+
+## Player Endpoints
+
+Player endpoints are read-only and are enabled when `SUPABASE_DB_URL` is configured.
+
+### Browse Players
+
+Request:
+
+```http
+GET /v1/players?q=alice&sort=run_count_desc&limit=50&offset=0
+```
+
+Supported query params:
+
+- `q` — optional filter matched against both Steam username and Steam ID (case-insensitive substring)
+- `sort` — `run_count_desc` (default), `run_count_asc`, `name_asc`
+- `limit` — page size (default `50`, max `200`)
+- `offset` — pagination offset (default `0`)
+
+Response:
+
+```json
+{
+	"players": [
+		{
+			"steam_id": "76561198000000000",
+			"steam_username": "alice",
+			"run_count": 412,
+			"last_run_at": "2026-04-28T09:15:00Z"
+		}
+	],
+	"limit": 50,
+	"offset": 0,
+	"count": 1,
+	"has_more": false
+}
+```
+
+### Get Player Detail
+
+Request:
+
+```http
+GET /v1/players/{steam_id}
+```
+
+Returns full profile for one player identified by their Steam ID.
+
+Response:
+
+```json
+{
+	"steam_id": "76561198000000000",
+	"steam_username": "alice",
+	"run_count": 412,
+	"last_run_at": "2026-04-28T09:15:00Z",
+	"created_at": "2025-11-01T08:00:00Z"
+}
+```
+
+Error responses:
+
+- `400 Bad Request` when `steam_id` is empty
+- `404 Not Found` when no account with that Steam ID exists
+
 ## Configuration
 
 Create a local env file from the template:
@@ -569,23 +771,29 @@ Environment variables:
 - `HTTP_IDLE_TIMEOUT` (default: `60s`)
 - `HTTP_READ_HEADER_TIMEOUT` (default: `5s`)
 - `HTTP_SHUTDOWN_TIMEOUT` (default: `10s`)
-- `RUNSYNC_ENABLED` (default: `false`)
-- `SUPABASE_DB_URL` (optional; when set, enables database-backed endpoints such as benchmarks, leaderboards, and run sync, and is validated on startup)
-- `R2_ENDPOINT` (required when run sync is enabled)
+- `RUNSYNC_ENABLED` (default: `false`) — gates upload endpoints only (sync, bulk sync, missing hashes); browse/detail/download endpoints are enabled independently of this flag
+- `SUPABASE_DB_URL` (optional; when set, enables database-backed endpoints: benchmarks, leaderboards, scenarios, players, and runs browse/detail)
+- `R2_ENDPOINT` (required for raw download and upload endpoints)
 - `R2_REGION` (default: `auto`)
 - `R2_RAW_PUBLIC_BUCKET` (default: `refleks-raw-public`)
 - `R2_LAB_PRIVATE_BUCKET` (default: `refleks-lab-private`, reserved for future premium/lab data flows)
 - `R2_RAW_PUBLIC_BASE_URL` (optional, enables direct public URL responses for raw downloads)
 - `R2_SIGNED_URL_TTL` (default: `15m`, used when public base URL is not configured)
-- `R2_ACCESS_KEY_ID` (required when run sync is enabled)
-- `R2_SECRET_ACCESS_KEY` (required when run sync is enabled)
+- `R2_ACCESS_KEY_ID` (required for raw download and upload endpoints)
+- `R2_SECRET_ACCESS_KEY` (required for raw download and upload endpoints)
 - `R2_KEY_PREFIX` (default: `runs`)
 - `RUNSYNC_MAX_FILE_BYTES` (default: `26214400`)
 - `RUNSYNC_MAX_BULK_FILES` (default: `100`)
 - `RUNSYNC_MAX_BULK_BYTES` (default: `262144000`)
 - `RUNSYNC_MAX_MISSING_HASHES` (default: `1000`)
 
-When `RUNSYNC_ENABLED=true`, the API expects `accounts`, `scenarios`, and `runs` tables/indexes to already exist (for example created by a separate worker or migration container).
+Endpoints activate in tiers based on configuration:
+
+1. **`SUPABASE_DB_URL` set** — enables benchmarks, leaderboards, scenarios, players, and run browse/detail.
+2. **R2 credentials set** (`R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) — additionally enables raw file download endpoints. Startup fails with an error if `RUNSYNC_ENABLED=true` but R2 is not fully configured.
+3. **`RUNSYNC_ENABLED=true`** (requires R2) — additionally enables upload endpoints (sync, bulk sync, missing hashes).
+
+When uploads are enabled (`RUNSYNC_ENABLED=true`), the API expects `accounts`, `scenarios`, and `runs` tables/indexes to already exist, including the `runs.stats_hash` column and unique index used for duplicate detection (for example created by a separate worker or migration container).
 
 When benchmark/leaderboard endpoints are enabled (`SUPABASE_DB_URL` is set), the API expects benchmark and leaderboard tables to exist (for example created by a separate worker or migration container).
 
