@@ -64,8 +64,8 @@ func (r *PostgresRepository) RunDetail(ctx context.Context, hash string) (runs.R
 			r.hash,
 			r.file_name,
 			s.scenario_name,
-			a.steam_id,
-			a.steam_username,
+			p.steam_id,
+			p.steam_username,
 			r.epoch_milli,
 			r.uploaded_at,
 			r.size_bytes,
@@ -80,7 +80,7 @@ func (r *PostgresRepository) RunDetail(ctx context.Context, hash string) (runs.R
 			r.mouse_pid
 		FROM runs r
 		JOIN scenarios s ON s.id = r.scenario_id
-		LEFT JOIN accounts a ON a.id = r.account_id
+		LEFT JOIN players p ON p.id = r.player_id
 		WHERE r.hash = $1
 		LIMIT 1
 	`, hash)
@@ -185,16 +185,16 @@ func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListReque
 		addArgClause("s.scenario_name ILIKE $%d", "%"+req.ScenarioName+"%")
 	}
 	if req.SteamID != "" {
-		addArgClause("COALESCE(a.steam_id, '') ILIKE $%d", "%"+req.SteamID+"%")
+		addArgClause("COALESCE(p.steam_id, '') ILIKE $%d", "%"+req.SteamID+"%")
 	}
 	if req.SteamUsername != "" {
-		addArgClause("COALESCE(a.steam_username, '') ILIKE $%d", "%"+req.SteamUsername+"%")
+		addArgClause("COALESCE(p.steam_username, '') ILIKE $%d", "%"+req.SteamUsername+"%")
 	}
 	if req.Query != "" {
 		args = append(args, "%"+req.Query+"%")
 		p := len(args)
 		clauses = append(clauses,
-			fmt.Sprintf("(r.file_name ILIKE $%d OR s.scenario_name ILIKE $%d OR COALESCE(a.steam_username, '') ILIKE $%d OR COALESCE(a.steam_id, '') ILIKE $%d)", p, p, p, p),
+			fmt.Sprintf("(r.file_name ILIKE $%d OR s.scenario_name ILIKE $%d OR COALESCE(p.steam_username, '') ILIKE $%d OR COALESCE(p.steam_id, '') ILIKE $%d)", p, p, p, p),
 		)
 	}
 	if req.HasMouseTrace != nil {
@@ -235,8 +235,8 @@ func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListReque
 			r.hash,
 			r.file_name,
 			s.scenario_name,
-			a.steam_id,
-			a.steam_username,
+			p.steam_id,
+			p.steam_username,
 			r.epoch_milli,
 			r.uploaded_at,
 			r.size_bytes,
@@ -251,7 +251,7 @@ func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListReque
 			r.mouse_pid
 		FROM runs r
 		JOIN scenarios s ON s.id = r.scenario_id
-		LEFT JOIN accounts a ON a.id = r.account_id
+		LEFT JOIN players p ON p.id = r.player_id
 		%s
 		ORDER BY %s
 		LIMIT $%d OFFSET $%d
@@ -335,7 +335,7 @@ func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 	}
 	defer tx.Rollback(ctx)
 
-	accountID, err := ensureAccount(ctx, tx, meta)
+	playerID, err := ensurePlayer(ctx, tx, meta)
 	if err != nil {
 		return false, err
 	}
@@ -346,7 +346,7 @@ func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO runs (
-			account_id,
+			player_id,
 			scenario_id,
 			hash,
 			file_name,
@@ -371,7 +371,7 @@ func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 		)
 		ON CONFLICT DO NOTHING
 	`,
-		accountID,
+		playerID,
 		scenarioID,
 		meta.Hash,
 		meta.FileName,
@@ -410,7 +410,7 @@ func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 	return true, nil
 }
 
-func ensureAccount(ctx context.Context, tx pgx.Tx, meta runs.RunMetadata) (*int64, error) {
+func ensurePlayer(ctx context.Context, tx pgx.Tx, meta runs.RunMetadata) (*int64, error) {
 	steamID := strings.TrimSpace(meta.SteamID)
 	if steamID == "" {
 		return nil, nil
@@ -418,10 +418,10 @@ func ensureAccount(ctx context.Context, tx pgx.Tx, meta runs.RunMetadata) (*int6
 
 	var id int64
 	err := tx.QueryRow(ctx, `
-		INSERT INTO accounts (steam_id, steam_username, updated_at)
+		INSERT INTO players (steam_id, steam_username, updated_at)
 		VALUES ($1, NULLIF($2, ''), NOW())
 		ON CONFLICT (steam_id) DO UPDATE
-			SET steam_username = COALESCE(NULLIF(EXCLUDED.steam_username, ''), accounts.steam_username),
+			SET steam_username = COALESCE(NULLIF(EXCLUDED.steam_username, ''), players.steam_username),
 				updated_at = NOW()
 		RETURNING id
 	`, steamID, strings.TrimSpace(meta.SteamUsername)).Scan(&id)

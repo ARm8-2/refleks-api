@@ -800,7 +800,7 @@ Endpoints activate in tiers based on configuration:
 2. **R2 credentials set** (`R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) — additionally enables raw file download endpoints. Startup fails with an error if `RUNSYNC_ENABLED=true` but R2 is not fully configured.
 3. **`RUNSYNC_ENABLED=true`** (requires R2) — additionally enables upload endpoints (sync, bulk sync, missing hashes).
 
-When uploads are enabled (`RUNSYNC_ENABLED=true`), the API expects `accounts`, `scenarios`, and `runs` tables/indexes to already exist (for example created by the worker schema bootstrap).
+When uploads are enabled (`RUNSYNC_ENABLED=true`), the API expects `players`, `scenarios`, and `runs` tables/indexes to already exist (for example created by the worker schema bootstrap).
 
 When benchmark/leaderboard endpoints are enabled (database configuration is present), the API expects benchmark and leaderboard tables to exist (for example created by the worker schema bootstrap).
 

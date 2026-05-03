@@ -43,10 +43,10 @@ func (r *PostgresRepository) ScenarioLeaderboard(ctx context.Context, req leader
 			sl.rank,
 			sl.best_score,
 			sl.best_epoch_milli,
-			a.steam_id,
-			a.steam_username
+			p.steam_id,
+			p.steam_username
 		FROM scenario_leaderboard_current sl
-		JOIN accounts a ON a.id = sl.account_id
+		JOIN players p ON p.id = sl.player_id
 		WHERE sl.scenario_id = $1
 		ORDER BY sl.rank ASC
 		LIMIT $2 OFFSET $3
@@ -120,10 +120,10 @@ func (r *PostgresRepository) BenchmarkDifficultyLeaderboard(ctx context.Context,
 			l.composite_score,
 			l.matched_scenarios,
 			l.last_epoch_milli,
-			a.steam_id,
-			a.steam_username
+			p.steam_id,
+			p.steam_username
 		FROM benchmark_difficulty_leaderboard_current l
-		JOIN accounts a ON a.id = l.account_id
+		JOIN players p ON p.id = l.player_id
 		WHERE l.difficulty_id = $1
 		ORDER BY l.rank ASC
 		LIMIT $2 OFFSET $3
