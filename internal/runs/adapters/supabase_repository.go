@@ -57,36 +57,6 @@ func (r *SupabaseRepository) ExistingHashes(ctx context.Context, hashes []string
 	return found, nil
 }
 
-// ExistingStatsHashes returns the subset of stats hashes that already exist.
-func (r *SupabaseRepository) ExistingStatsHashes(ctx context.Context, hashes []string) (map[string]struct{}, error) {
-	found := make(map[string]struct{})
-	if len(hashes) == 0 {
-		return found, nil
-	}
-
-	rows, err := r.pool.Query(ctx,
-		`SELECT stats_hash FROM runs WHERE stats_hash = ANY($1) AND stats_hash <> ''`,
-		hashes,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var hash string
-		if err := rows.Scan(&hash); err != nil {
-			return nil, err
-		}
-		found[strings.TrimSpace(hash)] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return found, nil
-}
-
 // RunDetail returns metadata for a single run by hash, shaped as a list item.
 func (r *SupabaseRepository) RunDetail(ctx context.Context, hash string) (runs.RunListItem, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -379,7 +349,6 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 			account_id,
 			scenario_id,
 			hash,
-			stats_hash,
 			file_name,
 			epoch_milli,
 			size_bytes,
@@ -398,14 +367,13 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 		)
 		VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-			$11,$12,$13,$14,$15,$16,$17,$18,$19
+			$11,$12,$13,$14,$15,$16,$17,$18
 		)
 		ON CONFLICT DO NOTHING
 	`,
 		accountID,
 		scenarioID,
 		meta.Hash,
-		meta.StatsHash,
 		meta.FileName,
 		meta.EpochMilli,
 		meta.SizeBytes,
