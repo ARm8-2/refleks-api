@@ -12,8 +12,8 @@ import (
 	"refleks-api/internal/benchmarks"
 )
 
-// SupabaseRepository reads benchmark metadata from Supabase Postgres.
-type SupabaseRepository struct {
+// PostgresRepository reads benchmark metadata from Postgres.
+type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
@@ -28,16 +28,16 @@ type subcategoryLookupKey struct {
 	name         string
 }
 
-// NewSupabaseRepository constructs a Supabase-backed benchmark repository.
-func NewSupabaseRepository(pool *pgxpool.Pool) (*SupabaseRepository, error) {
+// NewPostgresRepository constructs a Postgres-backed benchmark repository.
+func NewPostgresRepository(pool *pgxpool.Pool) (*PostgresRepository, error) {
 	if pool == nil {
-		return nil, fmt.Errorf("supabase pool is required")
+		return nil, fmt.Errorf("postgres pool is required")
 	}
-	return &SupabaseRepository{pool: pool}, nil
+	return &PostgresRepository{pool: pool}, nil
 }
 
 // ListBenchmarks returns benchmark metadata in client-friendly hierarchy form.
-func (r *SupabaseRepository) ListBenchmarks(ctx context.Context, req benchmarks.ListRequest) ([]benchmarks.Benchmark, error) {
+func (r *PostgresRepository) ListBenchmarks(ctx context.Context, req benchmarks.ListRequest) ([]benchmarks.Benchmark, error) {
 	benchmarkItems, benchmarkIDs, err := r.listBenchmarkRows(ctx, req)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (r *SupabaseRepository) ListBenchmarks(ctx context.Context, req benchmarks.
 	return benchmarkItems, nil
 }
 
-func (r *SupabaseRepository) listBenchmarkRows(ctx context.Context, req benchmarks.ListRequest) ([]benchmarks.Benchmark, []int64, error) {
+func (r *PostgresRepository) listBenchmarkRows(ctx context.Context, req benchmarks.ListRequest) ([]benchmarks.Benchmark, []int64, error) {
 	clauses := make([]string, 0, 1)
 	args := make([]any, 0, 3)
 
@@ -153,7 +153,7 @@ func (r *SupabaseRepository) listBenchmarkRows(ctx context.Context, req benchmar
 	return items, ids, nil
 }
 
-func (r *SupabaseRepository) attachDifficulties(ctx context.Context, benchmarkByID map[int64]*benchmarks.Benchmark, benchmarkIDs []int64) (map[int64]*benchmarks.BenchmarkDifficulty, error) {
+func (r *PostgresRepository) attachDifficulties(ctx context.Context, benchmarkByID map[int64]*benchmarks.Benchmark, benchmarkIDs []int64) (map[int64]*benchmarks.BenchmarkDifficulty, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			d.id,
@@ -227,7 +227,7 @@ func (r *SupabaseRepository) attachDifficulties(ctx context.Context, benchmarkBy
 	return out, nil
 }
 
-func (r *SupabaseRepository) attachRanks(ctx context.Context, difficultyByID map[int64]*benchmarks.BenchmarkDifficulty) error {
+func (r *PostgresRepository) attachRanks(ctx context.Context, difficultyByID map[int64]*benchmarks.BenchmarkDifficulty) error {
 	difficultyIDs := keysInt64(difficultyByID)
 	if len(difficultyIDs) == 0 {
 		return nil
@@ -280,7 +280,7 @@ func (r *SupabaseRepository) attachRanks(ctx context.Context, difficultyByID map
 	return rows.Err()
 }
 
-func (r *SupabaseRepository) attachCategories(ctx context.Context, difficultyByID map[int64]*benchmarks.BenchmarkDifficulty) (map[int64]*benchmarks.BenchmarkCategory, error) {
+func (r *PostgresRepository) attachCategories(ctx context.Context, difficultyByID map[int64]*benchmarks.BenchmarkDifficulty) (map[int64]*benchmarks.BenchmarkCategory, error) {
 	difficultyIDs := keysInt64(difficultyByID)
 
 	rows, err := r.pool.Query(ctx, `
@@ -346,7 +346,7 @@ func (r *SupabaseRepository) attachCategories(ctx context.Context, difficultyByI
 	return out, nil
 }
 
-func (r *SupabaseRepository) attachSubcategories(ctx context.Context, categoryByID map[int64]*benchmarks.BenchmarkCategory) error {
+func (r *PostgresRepository) attachSubcategories(ctx context.Context, categoryByID map[int64]*benchmarks.BenchmarkCategory) error {
 	categoryIDs := keysInt64(categoryByID)
 
 	rows, err := r.pool.Query(ctx, `
@@ -383,7 +383,7 @@ func (r *SupabaseRepository) attachSubcategories(ctx context.Context, categoryBy
 	return rows.Err()
 }
 
-func (r *SupabaseRepository) attachScenarioLinks(ctx context.Context, difficultyByID map[int64]*benchmarks.BenchmarkDifficulty) error {
+func (r *PostgresRepository) attachScenarioLinks(ctx context.Context, difficultyByID map[int64]*benchmarks.BenchmarkDifficulty) error {
 	difficultyIDs := keysInt64(difficultyByID)
 
 	categoryLookup := make(map[categoryLookupKey]*benchmarks.BenchmarkCategory)

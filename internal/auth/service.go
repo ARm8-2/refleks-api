@@ -4,20 +4,20 @@ import (
 	"context"
 	"time"
 
-	"refleks-api/internal/supabase"
+	"refleks-api/internal/postgres"
 )
 
 // Service provides authentication-related operations.
 type Service struct {
-	supabaseClient *supabase.Client
+	databaseClient *postgres.Client
 }
 
 // SessionStubResponse is a scaffold response for upcoming auth integration.
 type SessionStubResponse struct {
 	Status             string `json:"status"`
 	Message            string `json:"message"`
-	SupabaseConfigured bool   `json:"supabase_configured"`
-	SupabaseReachable  bool   `json:"supabase_reachable"`
+	DatabaseConfigured bool   `json:"database_configured"`
+	DatabaseReachable  bool   `json:"database_reachable"`
 	Authenticated      bool   `json:"authenticated"`
 }
 
@@ -33,8 +33,8 @@ type SteamLoginStubResponse struct {
 }
 
 // NewService creates an auth service.
-func NewService(supabaseClient *supabase.Client) *Service {
-	return &Service{supabaseClient: supabaseClient}
+func NewService(databaseClient *postgres.Client) *Service {
+	return &Service{databaseClient: databaseClient}
 }
 
 // SessionStub returns a stable contract while auth is being implemented.
@@ -42,17 +42,17 @@ func (s *Service) SessionStub(ctx context.Context) SessionStubResponse {
 	resp := SessionStubResponse{
 		Status:             "stub",
 		Message:            "auth integration pending",
-		SupabaseConfigured: s.supabaseClient != nil,
+		DatabaseConfigured: s.databaseClient != nil,
 		Authenticated:      false,
 	}
 
-	if s.supabaseClient == nil {
+	if s.databaseClient == nil {
 		return resp
 	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	resp.SupabaseReachable = s.supabaseClient.Ping(pingCtx) == nil
+	resp.DatabaseReachable = s.databaseClient.Ping(pingCtx) == nil
 	return resp
 }
 

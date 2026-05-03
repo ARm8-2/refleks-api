@@ -11,21 +11,21 @@ import (
 	"refleks-api/internal/scenarios"
 )
 
-// SupabaseRepository reads scenario metadata from Supabase Postgres.
-type SupabaseRepository struct {
+// PostgresRepository reads scenario metadata from Postgres.
+type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewSupabaseRepository constructs a Supabase-backed scenario repository.
-func NewSupabaseRepository(pool *pgxpool.Pool) (*SupabaseRepository, error) {
+// NewPostgresRepository constructs a Postgres-backed scenario repository.
+func NewPostgresRepository(pool *pgxpool.Pool) (*PostgresRepository, error) {
 	if pool == nil {
-		return nil, fmt.Errorf("supabase pool is required")
+		return nil, fmt.Errorf("postgres pool is required")
 	}
-	return &SupabaseRepository{pool: pool}, nil
+	return &PostgresRepository{pool: pool}, nil
 }
 
 // ListScenarios returns a filtered, sorted, paginated list of scenarios.
-func (r *SupabaseRepository) ListScenarios(ctx context.Context, req scenarios.ListRequest) ([]scenarios.ScenarioListItem, error) {
+func (r *PostgresRepository) ListScenarios(ctx context.Context, req scenarios.ListRequest) ([]scenarios.ScenarioListItem, error) {
 	args := make([]any, 0, 4)
 	where := ""
 	if req.Query != "" {
@@ -71,7 +71,7 @@ func (r *SupabaseRepository) ListScenarios(ctx context.Context, req scenarios.Li
 }
 
 // ScenarioByID returns full detail for one scenario including score and sensitivity distributions.
-func (r *SupabaseRepository) ScenarioByID(ctx context.Context, id int64) (scenarios.ScenarioDetail, error) {
+func (r *PostgresRepository) ScenarioByID(ctx context.Context, id int64) (scenarios.ScenarioDetail, error) {
 	var detail scenarios.ScenarioDetail
 	var scoreDistJSON []byte
 	var sensDistJSON []byte

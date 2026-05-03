@@ -14,21 +14,21 @@ import (
 	"refleks-api/internal/players"
 )
 
-// SupabaseRepository reads player account data from Supabase Postgres.
-type SupabaseRepository struct {
+// PostgresRepository reads player account data from Postgres.
+type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewSupabaseRepository constructs a Supabase-backed player repository.
-func NewSupabaseRepository(pool *pgxpool.Pool) (*SupabaseRepository, error) {
+// NewPostgresRepository constructs a Postgres-backed player repository.
+func NewPostgresRepository(pool *pgxpool.Pool) (*PostgresRepository, error) {
 	if pool == nil {
-		return nil, fmt.Errorf("supabase pool is required")
+		return nil, fmt.Errorf("postgres pool is required")
 	}
-	return &SupabaseRepository{pool: pool}, nil
+	return &PostgresRepository{pool: pool}, nil
 }
 
 // ListPlayers returns a filtered, sorted, paginated list of players with their run counts.
-func (r *SupabaseRepository) ListPlayers(ctx context.Context, req players.ListRequest) ([]players.PlayerListItem, error) {
+func (r *PostgresRepository) ListPlayers(ctx context.Context, req players.ListRequest) ([]players.PlayerListItem, error) {
 	args := make([]any, 0, 4)
 	where := ""
 	if req.Query != "" {
@@ -92,7 +92,7 @@ func (r *SupabaseRepository) ListPlayers(ctx context.Context, req players.ListRe
 }
 
 // PlayerBySteamID returns profile detail for one player.
-func (r *SupabaseRepository) PlayerBySteamID(ctx context.Context, steamID string) (players.PlayerDetail, error) {
+func (r *PostgresRepository) PlayerBySteamID(ctx context.Context, steamID string) (players.PlayerDetail, error) {
 	var detail players.PlayerDetail
 	var steamUsername sql.NullString
 	var lastRunAt sql.NullTime

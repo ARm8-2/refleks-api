@@ -12,7 +12,7 @@ This repository now includes:
 - Scenario browser (searchable, sortable, with score/sensitivity distributions).
 - Player browser (searchable, sortable, with run counts).
 - Benchmark and leaderboard read endpoints.
-- Supabase-backed metadata persistence.
+- Postgres-backed metadata persistence.
 - Cloudflare R2 raw file storage.
 
 ## Project Layout
@@ -28,7 +28,7 @@ This repository now includes:
 │   │   └── service.go
 │   ├── benchmarks/
 │   │   ├── adapters/
-│   │   │   └── supabase_repository.go
+│   │   │   └── postgres_repository.go
 │   │   ├── contracts.go
 │   │   ├── handler.go
 │   │   ├── service.go
@@ -42,14 +42,14 @@ This repository now includes:
 │   │   └── server.go
 │   ├── leaderboards/
 │   │   ├── adapters/
-│   │   │   └── supabase_repository.go
+│   │   │   └── postgres_repository.go
 │   │   ├── contracts.go
 │   │   ├── handler.go
 │   │   ├── service.go
 │   │   └── types.go
 │   ├── players/
 │   │   ├── adapters/
-│   │   │   └── supabase_repository.go
+│   │   │   └── postgres_repository.go
 │   │   ├── contracts.go
 │   │   ├── handler.go
 │   │   ├── service.go
@@ -57,7 +57,7 @@ This repository now includes:
 │   ├── runs/
 │   │   ├── adapters/
 │   │   │   ├── r2_store.go
-│   │   │   └── supabase_repository.go
+│   │   │   └── postgres_repository.go
 │   │   ├── contracts.go
 │   │   ├── handler.go
 │   │   ├── refleks_format.go
@@ -65,12 +65,12 @@ This repository now includes:
 │   │   └── types.go
 │   ├── scenarios/
 │   │   ├── adapters/
-│   │   │   └── supabase_repository.go
+│   │   │   └── postgres_repository.go
 │   │   ├── contracts.go
 │   │   ├── handler.go
 │   │   ├── service.go
 │   │   └── types.go
-│   ├── supabase/
+│   ├── postgres/
 │   │   └── client.go
 │   └── status/
 │       ├── handler.go
@@ -138,7 +138,8 @@ docker run -d \
 Notes:
 
 - The worker normally does not expose an HTTP port.
-- Both services should point to the same Supabase Postgres and R2 credentials.
+- Both services should point to the same Postgres database and R2 credentials.
+- In Docker Compose, the API and worker should usually use `POSTGRES_HOST=postgres` on the shared `refleks-net` network.
 
 ## Status Endpoint
 
@@ -175,8 +176,8 @@ Response:
 {
 	"status": "stub",
 	"message": "auth integration pending",
-	"supabase_configured": true,
-	"supabase_reachable": true,
+	"database_configured": true,
+	"database_reachable": true,
 	"authenticated": false
 }
 ```
@@ -209,7 +210,7 @@ This endpoint is a stable contract placeholder for premium/private access flows 
 
 ## Benchmark Endpoints
 
-Benchmark endpoints are read-only and are enabled when `SUPABASE_DB_URL` is configured.
+Benchmark endpoints are read-only and are enabled when database configuration is present (`DATABASE_URL` or `POSTGRES_*`).
 
 ### List Benchmarks
 
@@ -314,7 +315,7 @@ Response:
 
 ## Leaderboard Endpoints
 
-Leaderboard endpoints are read-only and are enabled when `SUPABASE_DB_URL` is configured.
+Leaderboard endpoints are read-only and are enabled when database configuration is present (`DATABASE_URL` or `POSTGRES_*`).
 
 ### Scenario Leaderboard
 
@@ -617,7 +618,7 @@ Response (signed fallback mode):
 
 ## Scenario Endpoints
 
-Scenario endpoints are read-only and are enabled when `SUPABASE_DB_URL` is configured.
+Scenario endpoints are read-only and are enabled when database configuration is present (`DATABASE_URL` or `POSTGRES_*`).
 
 ### Browse Scenarios
 
@@ -686,7 +687,7 @@ Error responses:
 
 ## Player Endpoints
 
-Player endpoints are read-only and are enabled when `SUPABASE_DB_URL` is configured.
+Player endpoints are read-only and are enabled when database configuration is present (`DATABASE_URL` or `POSTGRES_*`).
 
 ### Browse Players
 
@@ -772,7 +773,13 @@ Environment variables:
 - `HTTP_READ_HEADER_TIMEOUT` (default: `5s`)
 - `HTTP_SHUTDOWN_TIMEOUT` (default: `10s`)
 - `RUNSYNC_ENABLED` (default: `false`) — gates upload endpoints only (sync, bulk sync, missing hashes); browse/detail/download endpoints are enabled independently of this flag
-- `SUPABASE_DB_URL` (optional; when set, enables database-backed endpoints: benchmarks, leaderboards, scenarios, players, and runs browse/detail)
+- `DATABASE_URL` (optional; when set, enables database-backed endpoints: benchmarks, leaderboards, scenarios, players, and runs browse/detail)
+- `POSTGRES_HOST` (default: `postgres`; used when `DATABASE_URL` is not set)
+- `POSTGRES_PORT` (default: `5432`; used when `DATABASE_URL` is not set)
+- `POSTGRES_DB` (optional; enables database-backed endpoints when provided with `POSTGRES_USER` and `DATABASE_URL` is not set)
+- `POSTGRES_USER` (optional; enables database-backed endpoints when provided with `POSTGRES_DB` and `DATABASE_URL` is not set)
+- `POSTGRES_PASSWORD` (optional; used when `DATABASE_URL` is not set)
+- `POSTGRES_SSLMODE` (default: `disable`; used when `DATABASE_URL` is not set)
 - `R2_ENDPOINT` (required for raw download and upload endpoints)
 - `R2_REGION` (default: `auto`)
 - `R2_RAW_PUBLIC_BUCKET` (default: `refleks-raw-public`)
@@ -789,13 +796,13 @@ Environment variables:
 
 Endpoints activate in tiers based on configuration:
 
-1. **`SUPABASE_DB_URL` set** — enables benchmarks, leaderboards, scenarios, players, and run browse/detail.
+1. **Database configured** (`DATABASE_URL` or `POSTGRES_DB` + `POSTGRES_USER`) — enables benchmarks, leaderboards, scenarios, players, and run browse/detail.
 2. **R2 credentials set** (`R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) — additionally enables raw file download endpoints. Startup fails with an error if `RUNSYNC_ENABLED=true` but R2 is not fully configured.
 3. **`RUNSYNC_ENABLED=true`** (requires R2) — additionally enables upload endpoints (sync, bulk sync, missing hashes).
 
 When uploads are enabled (`RUNSYNC_ENABLED=true`), the API expects `accounts`, `scenarios`, and `runs` tables/indexes to already exist (for example created by the worker schema bootstrap).
 
-When benchmark/leaderboard endpoints are enabled (`SUPABASE_DB_URL` is set), the API expects benchmark and leaderboard tables to exist (for example created by the worker schema bootstrap).
+When benchmark/leaderboard endpoints are enabled (database configuration is present), the API expects benchmark and leaderboard tables to exist (for example created by the worker schema bootstrap).
 
 ## Test
 

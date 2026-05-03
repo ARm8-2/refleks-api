@@ -13,21 +13,21 @@ import (
 	"refleks-api/internal/leaderboards"
 )
 
-// SupabaseRepository reads precomputed leaderboards from Supabase Postgres.
-type SupabaseRepository struct {
+// PostgresRepository reads precomputed leaderboards from Postgres.
+type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewSupabaseRepository constructs a Supabase-backed leaderboard repository.
-func NewSupabaseRepository(pool *pgxpool.Pool) (*SupabaseRepository, error) {
+// NewPostgresRepository constructs a Postgres-backed leaderboard repository.
+func NewPostgresRepository(pool *pgxpool.Pool) (*PostgresRepository, error) {
 	if pool == nil {
-		return nil, fmt.Errorf("supabase pool is required")
+		return nil, fmt.Errorf("postgres pool is required")
 	}
-	return &SupabaseRepository{pool: pool}, nil
+	return &PostgresRepository{pool: pool}, nil
 }
 
 // ScenarioLeaderboard returns one scenario leaderboard page.
-func (r *SupabaseRepository) ScenarioLeaderboard(ctx context.Context, req leaderboards.ScenarioRequest) (leaderboards.ScenarioLeaderboardResponse, error) {
+func (r *PostgresRepository) ScenarioLeaderboard(ctx context.Context, req leaderboards.ScenarioRequest) (leaderboards.ScenarioLeaderboardResponse, error) {
 	scenarioID, scenarioName, err := r.resolveScenario(ctx, req)
 	if err != nil {
 		return leaderboards.ScenarioLeaderboardResponse{}, err
@@ -103,7 +103,7 @@ func (r *SupabaseRepository) ScenarioLeaderboard(ctx context.Context, req leader
 }
 
 // BenchmarkDifficultyLeaderboard returns one benchmark difficulty leaderboard page.
-func (r *SupabaseRepository) BenchmarkDifficultyLeaderboard(ctx context.Context, req leaderboards.BenchmarkDifficultyRequest) (leaderboards.BenchmarkDifficultyLeaderboardResponse, error) {
+func (r *PostgresRepository) BenchmarkDifficultyLeaderboard(ctx context.Context, req leaderboards.BenchmarkDifficultyRequest) (leaderboards.BenchmarkDifficultyLeaderboardResponse, error) {
 	difficultyID, kovaaksID, benchmarkName, difficultyName, err := r.resolveDifficulty(ctx, req)
 	if err != nil {
 		return leaderboards.BenchmarkDifficultyLeaderboardResponse{}, err
@@ -188,7 +188,7 @@ func (r *SupabaseRepository) BenchmarkDifficultyLeaderboard(ctx context.Context,
 	return resp, nil
 }
 
-func (r *SupabaseRepository) resolveScenario(ctx context.Context, req leaderboards.ScenarioRequest) (int64, string, error) {
+func (r *PostgresRepository) resolveScenario(ctx context.Context, req leaderboards.ScenarioRequest) (int64, string, error) {
 	var id int64
 	var name string
 
@@ -214,7 +214,7 @@ func (r *SupabaseRepository) resolveScenario(ctx context.Context, req leaderboar
 	return 0, "", err
 }
 
-func (r *SupabaseRepository) resolveDifficulty(ctx context.Context, req leaderboards.BenchmarkDifficultyRequest) (int64, int64, string, string, error) {
+func (r *PostgresRepository) resolveDifficulty(ctx context.Context, req leaderboards.BenchmarkDifficultyRequest) (int64, int64, string, string, error) {
 	var id int64
 	var kovaaksID int64
 	var benchmarkName string
@@ -248,7 +248,7 @@ func (r *SupabaseRepository) resolveDifficulty(ctx context.Context, req leaderbo
 	return 0, 0, "", "", err
 }
 
-func (r *SupabaseRepository) fetchScenarioRefreshedAt(ctx context.Context, scenarioID int64) (*time.Time, error) {
+func (r *PostgresRepository) fetchScenarioRefreshedAt(ctx context.Context, scenarioID int64) (*time.Time, error) {
 	var refreshed sql.NullTime
 	err := r.pool.QueryRow(ctx,
 		`SELECT MAX(updated_at) FROM scenario_leaderboard_current WHERE scenario_id = $1`,
@@ -264,7 +264,7 @@ func (r *SupabaseRepository) fetchScenarioRefreshedAt(ctx context.Context, scena
 	return &t, nil
 }
 
-func (r *SupabaseRepository) fetchDifficultyRefreshedAt(ctx context.Context, difficultyID int64) (*time.Time, error) {
+func (r *PostgresRepository) fetchDifficultyRefreshedAt(ctx context.Context, difficultyID int64) (*time.Time, error) {
 	var refreshed sql.NullTime
 	err := r.pool.QueryRow(ctx,
 		`SELECT MAX(updated_at) FROM benchmark_difficulty_leaderboard_current WHERE difficulty_id = $1`,

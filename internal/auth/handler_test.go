@@ -27,8 +27,8 @@ func TestHandleSessionStub_OK(t *testing.T) {
 	if body.Status != "stub" {
 		t.Fatalf("expected status=stub, got %q", body.Status)
 	}
-	if body.SupabaseConfigured {
-		t.Fatalf("expected supabase_configured=false")
+	if body.DatabaseConfigured {
+		t.Fatalf("expected database_configured=false")
 	}
 }
 

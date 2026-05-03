@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -45,7 +47,7 @@ type Config struct {
 	ShutdownTimeout   time.Duration
 
 	RunSyncEnabled          bool
-	SupabaseDBURL           string
+	DatabaseURL             string
 	R2Endpoint              string
 	R2Region                string
 	R2RawPublicBucket       string
@@ -143,7 +145,10 @@ func Load(version string) (Config, error) {
 		return Config{}, fmt.Errorf("RUNSYNC_MAX_MISSING_HASHES must be greater than zero")
 	}
 
-	supabaseDBURL := strings.TrimSpace(os.Getenv("SUPABASE_DB_URL"))
+	databaseURL, hasDatabaseConfig, err := loadOptionalDatabaseURL()
+	if err != nil {
+		return Config{}, err
+	}
 	r2Endpoint := strings.TrimSpace(os.Getenv("R2_ENDPOINT"))
 	r2RawBucket := envOrDefault("R2_RAW_PUBLIC_BUCKET", defaultR2RawPublicBucket)
 	r2LabPrivateBucket := envOrDefault("R2_LAB_PRIVATE_BUCKET", defaultR2LabPrivateBucket)
@@ -158,8 +163,8 @@ func Load(version string) (Config, error) {
 	r2KeyPrefix := envOrDefault("R2_KEY_PREFIX", defaultR2KeyPrefix)
 
 	if runSyncEnabled {
-		if supabaseDBURL == "" {
-			return Config{}, fmt.Errorf("SUPABASE_DB_URL is required when RUNSYNC_ENABLED=true")
+		if !hasDatabaseConfig {
+			return Config{}, fmt.Errorf("DATABASE_URL or POSTGRES_DB/POSTGRES_USER configuration is required when RUNSYNC_ENABLED=true")
 		}
 		if r2Endpoint == "" {
 			return Config{}, fmt.Errorf("R2_ENDPOINT is required when RUNSYNC_ENABLED=true")
@@ -185,7 +190,7 @@ func Load(version string) (Config, error) {
 		ShutdownTimeout:   shutdownTimeout,
 
 		RunSyncEnabled:          runSyncEnabled,
-		SupabaseDBURL:           supabaseDBURL,
+		DatabaseURL:             databaseURL,
 		R2Endpoint:              r2Endpoint,
 		R2Region:                r2Region,
 		R2RawPublicBucket:       strings.TrimSpace(r2RawBucket),
@@ -200,6 +205,69 @@ func Load(version string) (Config, error) {
 		RunSyncMaxBulkBytes:     runSyncMaxBulkBytes,
 		RunSyncMaxMissingHashes: runSyncMaxHashes,
 	}, nil
+}
+
+func loadOptionalDatabaseURL() (string, bool, error) {
+	ensureEnvLoaded()
+
+	if databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL")); databaseURL != "" {
+		return databaseURL, true, nil
+	}
+
+	hasAnyPostgresSetting := false
+	for _, key := range []string{"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_SSLMODE"} {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			hasAnyPostgresSetting = true
+			break
+		}
+	}
+	if !hasAnyPostgresSetting {
+		return "", false, nil
+	}
+
+	host := strings.TrimSpace(envOrDefault("POSTGRES_HOST", "postgres"))
+	port := strings.TrimSpace(envOrDefault("POSTGRES_PORT", "5432"))
+	database := strings.TrimSpace(os.Getenv("POSTGRES_DB"))
+	user := strings.TrimSpace(os.Getenv("POSTGRES_USER"))
+	password := strings.TrimSpace(os.Getenv("POSTGRES_PASSWORD"))
+	sslMode := strings.TrimSpace(envOrDefault("POSTGRES_SSLMODE", "disable"))
+
+	if host == "" {
+		return "", false, fmt.Errorf("POSTGRES_HOST must not be empty")
+	}
+	if port == "" {
+		return "", false, fmt.Errorf("POSTGRES_PORT must not be empty")
+	}
+	if _, err := strconv.Atoi(port); err != nil {
+		return "", false, fmt.Errorf("POSTGRES_PORT must be a valid integer: %w", err)
+	}
+	if database == "" {
+		return "", false, fmt.Errorf("POSTGRES_DB is required when DATABASE_URL is not set")
+	}
+	if user == "" {
+		return "", false, fmt.Errorf("POSTGRES_USER is required when DATABASE_URL is not set")
+	}
+	if sslMode == "" {
+		return "", false, fmt.Errorf("POSTGRES_SSLMODE must not be empty")
+	}
+
+	connectionUser := url.User(user)
+	if password != "" {
+		connectionUser = url.UserPassword(user, password)
+	}
+
+	connectionURL := &url.URL{
+		Scheme: "postgresql",
+		User:   connectionUser,
+		Host:   net.JoinHostPort(host, port),
+		Path:   database,
+	}
+
+	query := url.Values{}
+	query.Set("sslmode", sslMode)
+	connectionURL.RawQuery = query.Encode()
+
+	return connectionURL.String(), true, nil
 }
 
 func envOrDefault(key, fallback string) string {

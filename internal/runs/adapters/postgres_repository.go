@@ -13,22 +13,22 @@ import (
 	"refleks-api/internal/runs"
 )
 
-// SupabaseRepository stores run metadata in Supabase Postgres.
-type SupabaseRepository struct {
+// PostgresRepository stores run metadata in Postgres.
+type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewSupabaseRepository builds a run sync repository from a shared Supabase pool.
-func NewSupabaseRepository(pool *pgxpool.Pool) (*SupabaseRepository, error) {
+// NewPostgresRepository builds a run sync repository from a shared Postgres pool.
+func NewPostgresRepository(pool *pgxpool.Pool) (*PostgresRepository, error) {
 	if pool == nil {
-		return nil, fmt.Errorf("supabase pool is required")
+		return nil, fmt.Errorf("postgres pool is required")
 	}
 
-	return &SupabaseRepository{pool: pool}, nil
+	return &PostgresRepository{pool: pool}, nil
 }
 
 // ExistingHashes returns the subset of hashes that already exist.
-func (r *SupabaseRepository) ExistingHashes(ctx context.Context, hashes []string) (map[string]struct{}, error) {
+func (r *PostgresRepository) ExistingHashes(ctx context.Context, hashes []string) (map[string]struct{}, error) {
 	found := make(map[string]struct{})
 	if len(hashes) == 0 {
 		return found, nil
@@ -58,7 +58,7 @@ func (r *SupabaseRepository) ExistingHashes(ctx context.Context, hashes []string
 }
 
 // RunDetail returns metadata for a single run by hash, shaped as a list item.
-func (r *SupabaseRepository) RunDetail(ctx context.Context, hash string) (runs.RunListItem, error) {
+func (r *PostgresRepository) RunDetail(ctx context.Context, hash string) (runs.RunListItem, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			r.hash,
@@ -153,7 +153,7 @@ func (r *SupabaseRepository) RunDetail(ctx context.Context, hash string) (runs.R
 }
 
 // RunByHash returns one persisted run lookup by hash.
-func (r *SupabaseRepository) RunByHash(ctx context.Context, hash string) (runs.StoredRun, error) {
+func (r *PostgresRepository) RunByHash(ctx context.Context, hash string) (runs.StoredRun, error) {
 	var run runs.StoredRun
 	err := r.pool.QueryRow(ctx,
 		`SELECT object_key, file_name FROM runs WHERE hash = $1 LIMIT 1`,
@@ -169,7 +169,7 @@ func (r *SupabaseRepository) RunByHash(ctx context.Context, hash string) (runs.S
 }
 
 // ListRuns returns filtered/sorted run rows for frontend browse pages.
-func (r *SupabaseRepository) ListRuns(ctx context.Context, req runs.RunListRequest) ([]runs.RunListItem, error) {
+func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListRequest) ([]runs.RunListItem, error) {
 	clauses := make([]string, 0, 8)
 	args := make([]any, 0, 10)
 
@@ -328,7 +328,7 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runs.RunListReque
 }
 
 // InsertRun inserts run metadata. It returns false when the row already exists.
-func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runs.RunMetadata) (bool, error) {
+func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadata) (bool, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return false, err
