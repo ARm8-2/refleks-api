@@ -71,7 +71,6 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 	parsedFileName := ensureRunFileExtension(parsed.FileName)
 
 	hash := sha256Hex(raw)
-	statsHash := parsed.StatsHash
 	sizeBytes := int64(len(raw))
 	existing, err := s.repo.ExistingHashes(ctx, []string{hash})
 	if err != nil {
@@ -79,16 +78,6 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 	}
 	if _, ok := existing[hash]; ok {
 		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
-	}
-
-	if statsHash != "" {
-		existingStatsHashes, err := s.repo.ExistingStatsHashes(ctx, []string{statsHash})
-		if err != nil {
-			return SyncResult{}, fmt.Errorf("query existing stats hash: %w", err)
-		}
-		if _, ok := existingStatsHashes[statsHash]; ok {
-			return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
-		}
 	}
 
 	uploadedAt := s.now().UTC()
@@ -99,7 +88,6 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 
 	meta := RunMetadata{
 		Hash:          hash,
-		StatsHash:     statsHash,
 		FileName:      parsedFileName,
 		ScenarioName:  strings.TrimSpace(parsed.ScenarioName),
 		SteamID:       strings.TrimSpace(parsed.SteamID),

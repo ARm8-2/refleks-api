@@ -20,12 +20,12 @@ import (
 	leaderboardadapters "refleks-api/internal/leaderboards/adapters"
 	"refleks-api/internal/players"
 	playeradapters "refleks-api/internal/players/adapters"
+	"refleks-api/internal/postgres"
 	"refleks-api/internal/runs"
 	runadapters "refleks-api/internal/runs/adapters"
 	"refleks-api/internal/scenarios"
 	scenarioadapters "refleks-api/internal/scenarios/adapters"
 	"refleks-api/internal/status"
-	"refleks-api/internal/supabase"
 )
 
 var version = "dev"
@@ -50,32 +50,32 @@ func run() error {
 	var benchmarkRoutes *httpapi.BenchmarkRoutes
 	var leaderboardRoutes *httpapi.LeaderboardRoutes
 
-	var supabaseClient *supabase.Client
-	if cfg.SupabaseDBURL != "" {
-		supabaseClient, err = supabase.NewClient(context.Background(), cfg.SupabaseDBURL)
+	var databaseClient *postgres.Client
+	if cfg.DatabaseURL != "" {
+		databaseClient, err = postgres.NewClient(context.Background(), cfg.DatabaseURL)
 		if err != nil {
-			return fmt.Errorf("init supabase client: %w", err)
+			return fmt.Errorf("init postgres client: %w", err)
 		}
 		pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelPing()
-		if err := supabaseClient.Ping(pingCtx); err != nil {
-			return fmt.Errorf("ping supabase: %w", err)
+		if err := databaseClient.Ping(pingCtx); err != nil {
+			return fmt.Errorf("ping postgres: %w", err)
 		}
-		defer supabaseClient.Close()
-		logger.Info("supabase client enabled")
+		defer databaseClient.Close()
+		logger.Info("postgres client enabled")
 	} else {
-		logger.Warn("supabase client disabled: SUPABASE_DB_URL is empty")
+		logger.Warn("database-backed endpoints disabled: database configuration is empty")
 	}
 
-	authSvc := auth.NewService(supabaseClient)
+	authSvc := auth.NewService(databaseClient)
 	authHandler := auth.NewHandler(authSvc)
 	authRoutes = &httpapi.AuthRoutes{
 		SessionStub: http.HandlerFunc(authHandler.HandleSessionStub),
 		SteamLogin:  http.HandlerFunc(authHandler.HandleSteamLoginStub),
 	}
 
-	if supabaseClient != nil {
-		benchmarkRepo, err := benchadapters.NewSupabaseRepository(supabaseClient.Pool())
+	if databaseClient != nil {
+		benchmarkRepo, err := benchadapters.NewPostgresRepository(databaseClient.Pool())
 		if err != nil {
 			return fmt.Errorf("init benchmark repository: %w", err)
 		}
@@ -83,7 +83,7 @@ func run() error {
 		benchmarkHandler := benchmarks.NewHandler(benchmarkSvc)
 		benchmarkRoutes = &httpapi.BenchmarkRoutes{List: http.HandlerFunc(benchmarkHandler.HandleList)}
 
-		leaderboardRepo, err := leaderboardadapters.NewSupabaseRepository(supabaseClient.Pool())
+		leaderboardRepo, err := leaderboardadapters.NewPostgresRepository(databaseClient.Pool())
 		if err != nil {
 			return fmt.Errorf("init leaderboard repository: %w", err)
 		}
@@ -96,14 +96,14 @@ func run() error {
 
 		logger.Info("benchmark and leaderboard endpoints enabled")
 	} else {
-		logger.Warn("benchmark and leaderboard endpoints disabled: SUPABASE_DB_URL is empty")
+		logger.Warn("benchmark and leaderboard endpoints disabled: database configuration is empty")
 	}
 
 	var runRoutes *httpapi.RunRoutes
 	var scenarioRoutes *httpapi.ScenarioRoutes
 	var playerRoutes *httpapi.PlayerRoutes
-	if supabaseClient != nil {
-		runRepo, err := runadapters.NewSupabaseRepository(supabaseClient.Pool())
+	if databaseClient != nil {
+		runRepo, err := runadapters.NewPostgresRepository(databaseClient.Pool())
 		if err != nil {
 			return fmt.Errorf("init run repository: %w", err)
 		}
@@ -156,7 +156,7 @@ func run() error {
 			logger.Warn("run raw download endpoints disabled: R2 configuration is incomplete")
 		}
 
-		scenarioRepo, err := scenarioadapters.NewSupabaseRepository(supabaseClient.Pool())
+		scenarioRepo, err := scenarioadapters.NewPostgresRepository(databaseClient.Pool())
 		if err != nil {
 			return fmt.Errorf("init scenario repository: %w", err)
 		}
@@ -167,7 +167,7 @@ func run() error {
 			Get:  http.HandlerFunc(scenarioHandler.HandleGet),
 		}
 
-		playerRepo, err := playeradapters.NewSupabaseRepository(supabaseClient.Pool())
+		playerRepo, err := playeradapters.NewPostgresRepository(databaseClient.Pool())
 		if err != nil {
 			return fmt.Errorf("init player repository: %w", err)
 		}
@@ -180,7 +180,7 @@ func run() error {
 
 		logger.Info("run, scenario, and player read endpoints enabled")
 	} else {
-		logger.Warn("run, scenario, and player endpoints disabled: SUPABASE_DB_URL is empty")
+		logger.Warn("run, scenario, and player endpoints disabled: database configuration is empty")
 	}
 
 	router := httpapi.NewRouter(logger, status.NewHandler(statusService), authRoutes, benchmarkRoutes, leaderboardRoutes, scenarioRoutes, playerRoutes, runRoutes)

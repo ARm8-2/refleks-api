@@ -13,22 +13,22 @@ import (
 	"refleks-api/internal/runs"
 )
 
-// SupabaseRepository stores run metadata in Supabase Postgres.
-type SupabaseRepository struct {
+// PostgresRepository stores run metadata in Postgres.
+type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewSupabaseRepository builds a run sync repository from a shared Supabase pool.
-func NewSupabaseRepository(pool *pgxpool.Pool) (*SupabaseRepository, error) {
+// NewPostgresRepository builds a run sync repository from a shared Postgres pool.
+func NewPostgresRepository(pool *pgxpool.Pool) (*PostgresRepository, error) {
 	if pool == nil {
-		return nil, fmt.Errorf("supabase pool is required")
+		return nil, fmt.Errorf("postgres pool is required")
 	}
 
-	return &SupabaseRepository{pool: pool}, nil
+	return &PostgresRepository{pool: pool}, nil
 }
 
 // ExistingHashes returns the subset of hashes that already exist.
-func (r *SupabaseRepository) ExistingHashes(ctx context.Context, hashes []string) (map[string]struct{}, error) {
+func (r *PostgresRepository) ExistingHashes(ctx context.Context, hashes []string) (map[string]struct{}, error) {
 	found := make(map[string]struct{})
 	if len(hashes) == 0 {
 		return found, nil
@@ -57,45 +57,15 @@ func (r *SupabaseRepository) ExistingHashes(ctx context.Context, hashes []string
 	return found, nil
 }
 
-// ExistingStatsHashes returns the subset of stats hashes that already exist.
-func (r *SupabaseRepository) ExistingStatsHashes(ctx context.Context, hashes []string) (map[string]struct{}, error) {
-	found := make(map[string]struct{})
-	if len(hashes) == 0 {
-		return found, nil
-	}
-
-	rows, err := r.pool.Query(ctx,
-		`SELECT stats_hash FROM runs WHERE stats_hash = ANY($1) AND stats_hash <> ''`,
-		hashes,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var hash string
-		if err := rows.Scan(&hash); err != nil {
-			return nil, err
-		}
-		found[strings.TrimSpace(hash)] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return found, nil
-}
-
 // RunDetail returns metadata for a single run by hash, shaped as a list item.
-func (r *SupabaseRepository) RunDetail(ctx context.Context, hash string) (runs.RunListItem, error) {
+func (r *PostgresRepository) RunDetail(ctx context.Context, hash string) (runs.RunListItem, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			r.hash,
 			r.file_name,
 			s.scenario_name,
-			a.steam_id,
-			a.steam_username,
+			p.steam_id,
+			p.steam_username,
 			r.epoch_milli,
 			r.uploaded_at,
 			r.size_bytes,
@@ -110,7 +80,7 @@ func (r *SupabaseRepository) RunDetail(ctx context.Context, hash string) (runs.R
 			r.mouse_pid
 		FROM runs r
 		JOIN scenarios s ON s.id = r.scenario_id
-		LEFT JOIN accounts a ON a.id = r.account_id
+		LEFT JOIN players p ON p.id = r.player_id
 		WHERE r.hash = $1
 		LIMIT 1
 	`, hash)
@@ -183,7 +153,7 @@ func (r *SupabaseRepository) RunDetail(ctx context.Context, hash string) (runs.R
 }
 
 // RunByHash returns one persisted run lookup by hash.
-func (r *SupabaseRepository) RunByHash(ctx context.Context, hash string) (runs.StoredRun, error) {
+func (r *PostgresRepository) RunByHash(ctx context.Context, hash string) (runs.StoredRun, error) {
 	var run runs.StoredRun
 	err := r.pool.QueryRow(ctx,
 		`SELECT object_key, file_name FROM runs WHERE hash = $1 LIMIT 1`,
@@ -199,7 +169,7 @@ func (r *SupabaseRepository) RunByHash(ctx context.Context, hash string) (runs.S
 }
 
 // ListRuns returns filtered/sorted run rows for frontend browse pages.
-func (r *SupabaseRepository) ListRuns(ctx context.Context, req runs.RunListRequest) ([]runs.RunListItem, error) {
+func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListRequest) ([]runs.RunListItem, error) {
 	clauses := make([]string, 0, 8)
 	args := make([]any, 0, 10)
 
@@ -215,16 +185,16 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runs.RunListReque
 		addArgClause("s.scenario_name ILIKE $%d", "%"+req.ScenarioName+"%")
 	}
 	if req.SteamID != "" {
-		addArgClause("COALESCE(a.steam_id, '') ILIKE $%d", "%"+req.SteamID+"%")
+		addArgClause("COALESCE(p.steam_id, '') ILIKE $%d", "%"+req.SteamID+"%")
 	}
 	if req.SteamUsername != "" {
-		addArgClause("COALESCE(a.steam_username, '') ILIKE $%d", "%"+req.SteamUsername+"%")
+		addArgClause("COALESCE(p.steam_username, '') ILIKE $%d", "%"+req.SteamUsername+"%")
 	}
 	if req.Query != "" {
 		args = append(args, "%"+req.Query+"%")
 		p := len(args)
 		clauses = append(clauses,
-			fmt.Sprintf("(r.file_name ILIKE $%d OR s.scenario_name ILIKE $%d OR COALESCE(a.steam_username, '') ILIKE $%d OR COALESCE(a.steam_id, '') ILIKE $%d)", p, p, p, p),
+			fmt.Sprintf("(r.file_name ILIKE $%d OR s.scenario_name ILIKE $%d OR COALESCE(p.steam_username, '') ILIKE $%d OR COALESCE(p.steam_id, '') ILIKE $%d)", p, p, p, p),
 		)
 	}
 	if req.HasMouseTrace != nil {
@@ -265,8 +235,8 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runs.RunListReque
 			r.hash,
 			r.file_name,
 			s.scenario_name,
-			a.steam_id,
-			a.steam_username,
+			p.steam_id,
+			p.steam_username,
 			r.epoch_milli,
 			r.uploaded_at,
 			r.size_bytes,
@@ -281,7 +251,7 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runs.RunListReque
 			r.mouse_pid
 		FROM runs r
 		JOIN scenarios s ON s.id = r.scenario_id
-		LEFT JOIN accounts a ON a.id = r.account_id
+		LEFT JOIN players p ON p.id = r.player_id
 		%s
 		ORDER BY %s
 		LIMIT $%d OFFSET $%d
@@ -358,14 +328,14 @@ func (r *SupabaseRepository) ListRuns(ctx context.Context, req runs.RunListReque
 }
 
 // InsertRun inserts run metadata. It returns false when the row already exists.
-func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runs.RunMetadata) (bool, error) {
+func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadata) (bool, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
 
-	accountID, err := ensureAccount(ctx, tx, meta)
+	playerID, err := ensurePlayer(ctx, tx, meta)
 	if err != nil {
 		return false, err
 	}
@@ -376,10 +346,9 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO runs (
-			account_id,
+			player_id,
 			scenario_id,
 			hash,
-			stats_hash,
 			file_name,
 			epoch_milli,
 			size_bytes,
@@ -398,14 +367,13 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 		)
 		VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-			$11,$12,$13,$14,$15,$16,$17,$18,$19
+			$11,$12,$13,$14,$15,$16,$17,$18
 		)
 		ON CONFLICT DO NOTHING
 	`,
-		accountID,
+		playerID,
 		scenarioID,
 		meta.Hash,
-		meta.StatsHash,
 		meta.FileName,
 		meta.EpochMilli,
 		meta.SizeBytes,
@@ -442,7 +410,7 @@ func (r *SupabaseRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 	return true, nil
 }
 
-func ensureAccount(ctx context.Context, tx pgx.Tx, meta runs.RunMetadata) (*int64, error) {
+func ensurePlayer(ctx context.Context, tx pgx.Tx, meta runs.RunMetadata) (*int64, error) {
 	steamID := strings.TrimSpace(meta.SteamID)
 	if steamID == "" {
 		return nil, nil
@@ -450,10 +418,10 @@ func ensureAccount(ctx context.Context, tx pgx.Tx, meta runs.RunMetadata) (*int6
 
 	var id int64
 	err := tx.QueryRow(ctx, `
-		INSERT INTO accounts (steam_id, steam_username, updated_at)
+		INSERT INTO players (steam_id, steam_username, updated_at)
 		VALUES ($1, NULLIF($2, ''), NOW())
 		ON CONFLICT (steam_id) DO UPDATE
-			SET steam_username = COALESCE(NULLIF(EXCLUDED.steam_username, ''), accounts.steam_username),
+			SET steam_username = COALESCE(NULLIF(EXCLUDED.steam_username, ''), players.steam_username),
 				updated_at = NOW()
 		RETURNING id
 	`, steamID, strings.TrimSpace(meta.SteamUsername)).Scan(&id)

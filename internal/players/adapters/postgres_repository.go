@@ -14,21 +14,21 @@ import (
 	"refleks-api/internal/players"
 )
 
-// SupabaseRepository reads player account data from Supabase Postgres.
-type SupabaseRepository struct {
+// PostgresRepository reads player data from Postgres.
+type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewSupabaseRepository constructs a Supabase-backed player repository.
-func NewSupabaseRepository(pool *pgxpool.Pool) (*SupabaseRepository, error) {
+// NewPostgresRepository constructs a Postgres-backed player repository.
+func NewPostgresRepository(pool *pgxpool.Pool) (*PostgresRepository, error) {
 	if pool == nil {
-		return nil, fmt.Errorf("supabase pool is required")
+		return nil, fmt.Errorf("postgres pool is required")
 	}
-	return &SupabaseRepository{pool: pool}, nil
+	return &PostgresRepository{pool: pool}, nil
 }
 
 // ListPlayers returns a filtered, sorted, paginated list of players with their run counts.
-func (r *SupabaseRepository) ListPlayers(ctx context.Context, req players.ListRequest) ([]players.PlayerListItem, error) {
+func (r *PostgresRepository) ListPlayers(ctx context.Context, req players.ListRequest) ([]players.PlayerListItem, error) {
 	args := make([]any, 0, 4)
 	where := ""
 	if req.Query != "" {
@@ -45,14 +45,14 @@ func (r *SupabaseRepository) ListPlayers(ctx context.Context, req players.ListRe
 
 	query := fmt.Sprintf(`
 		SELECT
-			a.steam_id,
-			a.steam_username,
+			p.steam_id,
+			p.steam_username,
 			COUNT(r.id) AS run_count,
 			MAX(r.uploaded_at) AS last_run_at
-		FROM accounts a
-		LEFT JOIN runs r ON r.account_id = a.id
+		FROM players p
+		LEFT JOIN runs r ON r.player_id = p.id
 		%s
-		GROUP BY a.id, a.steam_id, a.steam_username
+		GROUP BY p.id, p.steam_id, p.steam_username
 		ORDER BY %s
 		LIMIT $%d OFFSET $%d
 	`, where, orderBy, limitPos, offsetPos)
@@ -92,7 +92,7 @@ func (r *SupabaseRepository) ListPlayers(ctx context.Context, req players.ListRe
 }
 
 // PlayerBySteamID returns profile detail for one player.
-func (r *SupabaseRepository) PlayerBySteamID(ctx context.Context, steamID string) (players.PlayerDetail, error) {
+func (r *PostgresRepository) PlayerBySteamID(ctx context.Context, steamID string) (players.PlayerDetail, error) {
 	var detail players.PlayerDetail
 	var steamUsername sql.NullString
 	var lastRunAt sql.NullTime
@@ -101,15 +101,15 @@ func (r *SupabaseRepository) PlayerBySteamID(ctx context.Context, steamID string
 
 	err := r.pool.QueryRow(ctx, `
 		SELECT
-			a.steam_id,
-			a.steam_username,
-			a.created_at,
+			p.steam_id,
+			p.steam_username,
+			p.created_at,
 			COUNT(r.id) AS run_count,
 			MAX(r.uploaded_at) AS last_run_at
-		FROM accounts a
-		LEFT JOIN runs r ON r.account_id = a.id
-		WHERE a.steam_id = $1
-		GROUP BY a.id, a.steam_id, a.steam_username, a.created_at
+		FROM players p
+		LEFT JOIN runs r ON r.player_id = p.id
+		WHERE p.steam_id = $1
+		GROUP BY p.id, p.steam_id, p.steam_username, p.created_at
 		LIMIT 1
 	`, strings.TrimSpace(steamID)).Scan(
 		&detail.SteamID,
@@ -141,10 +141,10 @@ func (r *SupabaseRepository) PlayerBySteamID(ctx context.Context, steamID string
 func playersOrderBySQL(sort players.PlayerSort) string {
 	switch sort {
 	case players.PlayerSortRunCountAsc:
-		return "run_count ASC, a.id ASC"
+		return "run_count ASC, p.id ASC"
 	case players.PlayerSortNameAsc:
-		return "a.steam_username ASC NULLS LAST, a.id ASC"
+		return "p.steam_username ASC NULLS LAST, p.id ASC"
 	default: // PlayerSortRunCountDesc
-		return "run_count DESC, a.id ASC"
+		return "run_count DESC, p.id ASC"
 	}
 }

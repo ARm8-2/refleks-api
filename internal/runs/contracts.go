@@ -19,7 +19,6 @@ var (
 // Repository persists and queries sync metadata.
 type Repository interface {
 	ExistingHashes(ctx context.Context, hashes []string) (map[string]struct{}, error)
-	ExistingStatsHashes(ctx context.Context, hashes []string) (map[string]struct{}, error)
 	InsertRun(ctx context.Context, meta RunMetadata) (bool, error)
 	RunByHash(ctx context.Context, hash string) (StoredRun, error)
 	RunDetail(ctx context.Context, hash string) (RunListItem, error)
