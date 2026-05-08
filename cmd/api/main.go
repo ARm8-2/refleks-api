@@ -25,6 +25,8 @@ import (
 	runadapters "refleks-api/internal/runs/adapters"
 	"refleks-api/internal/scenarios"
 	scenarioadapters "refleks-api/internal/scenarios/adapters"
+	"refleks-api/internal/stats"
+	statsadapters "refleks-api/internal/stats/adapters"
 	"refleks-api/internal/status"
 )
 
@@ -49,6 +51,7 @@ func run() error {
 	var authRoutes *httpapi.AuthRoutes
 	var benchmarkRoutes *httpapi.BenchmarkRoutes
 	var leaderboardRoutes *httpapi.LeaderboardRoutes
+	var statsHandler http.Handler
 
 	var databaseClient *postgres.Client
 	if cfg.DatabaseURL != "" {
@@ -75,6 +78,13 @@ func run() error {
 	}
 
 	if databaseClient != nil {
+		statsRepo, err := statsadapters.NewPostgresRepository(databaseClient.Pool())
+		if err != nil {
+			return fmt.Errorf("init stats repository: %w", err)
+		}
+		statsSvc := stats.NewService(statsRepo)
+		statsHandler = http.HandlerFunc(stats.NewHandler(statsSvc).HandleGet)
+
 		benchmarkRepo, err := benchadapters.NewPostgresRepository(databaseClient.Pool())
 		if err != nil {
 			return fmt.Errorf("init benchmark repository: %w", err)
@@ -94,9 +104,9 @@ func run() error {
 			BenchmarkDifficulty: http.HandlerFunc(leaderboardHandler.HandleBenchmarkDifficulty),
 		}
 
-		logger.Info("benchmark and leaderboard endpoints enabled")
+		logger.Info("stats, benchmark, and leaderboard endpoints enabled")
 	} else {
-		logger.Warn("benchmark and leaderboard endpoints disabled: database configuration is empty")
+		logger.Warn("stats, benchmark, and leaderboard endpoints disabled: database configuration is empty")
 	}
 
 	var runRoutes *httpapi.RunRoutes
@@ -183,7 +193,7 @@ func run() error {
 		logger.Warn("run, scenario, and player endpoints disabled: database configuration is empty")
 	}
 
-	router := httpapi.NewRouter(logger, status.NewHandler(statusService), authRoutes, benchmarkRoutes, leaderboardRoutes, scenarioRoutes, playerRoutes, runRoutes)
+	router := httpapi.NewRouter(logger, status.NewHandler(statusService), statsHandler, authRoutes, benchmarkRoutes, leaderboardRoutes, scenarioRoutes, playerRoutes, runRoutes)
 	server := httpserver.New(cfg, logger, router)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

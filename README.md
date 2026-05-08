@@ -8,6 +8,7 @@ This repository now includes:
 - Structured logging and middleware-ready HTTP stack.
 - Graceful shutdown and timeout configuration.
 - Status endpoint.
+- Stats endpoint for aggregate database counts.
 - Run sync API for `.refleks` uploads, deduplication, browsing, and raw downloads.
 - Scenario browser (searchable, sortable, with score/sensitivity distributions).
 - Player browser (searchable, sortable, with run counts).
@@ -159,6 +160,26 @@ Example response:
 	"version": "dev",
 	"timestamp": "2026-03-22T11:00:00.000000000Z",
 	"uptime_seconds": 12
+}
+```
+
+## Stats Endpoint
+
+This endpoint is read-only and enabled when database configuration is present (`DATABASE_URL` or `POSTGRES_*`).
+
+Request:
+
+```http
+GET /v1/stats
+```
+
+Example response:
+
+```json
+{
+	"total_runs": 124523,
+	"total_players": 3812,
+	"total_scenarios": 296
 }
 ```
 

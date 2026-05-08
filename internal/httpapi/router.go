@@ -46,9 +46,12 @@ type RunRoutes struct {
 }
 
 // NewRouter configures API routes and middleware.
-func NewRouter(logger *slog.Logger, statusHandler http.Handler, authRoutes *AuthRoutes, benchmarkRoutes *BenchmarkRoutes, leaderboardRoutes *LeaderboardRoutes, scenarioRoutes *ScenarioRoutes, playerRoutes *PlayerRoutes, runRoutes *RunRoutes) http.Handler {
+func NewRouter(logger *slog.Logger, statusHandler http.Handler, statsHandler http.Handler, authRoutes *AuthRoutes, benchmarkRoutes *BenchmarkRoutes, leaderboardRoutes *LeaderboardRoutes, scenarioRoutes *ScenarioRoutes, playerRoutes *PlayerRoutes, runRoutes *RunRoutes) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/status", statusHandler)
+	if statsHandler != nil {
+		mux.Handle("GET /v1/stats", statsHandler)
+	}
 	if authRoutes != nil {
 		if authRoutes.SessionStub != nil {
 			mux.Handle("GET /v1/auth/session", authRoutes.SessionStub)
