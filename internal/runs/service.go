@@ -21,10 +21,11 @@ const (
 
 // Service orchestrates metadata persistence and blob storage for run sync.
 type Service struct {
-	repo      Repository
-	store     ObjectStore
-	keyPrefix string
-	now       func() time.Time
+	repo        Repository
+	store       ObjectStore
+	configStore ConfigStore
+	keyPrefix   string
+	now         func() time.Time
 }
 
 // RawDownload contains a streamed object payload for a synced .refleks file.
@@ -46,15 +47,16 @@ type RawDownloadLink struct {
 }
 
 // NewService constructs the run sync service.
-func NewService(repo Repository, store ObjectStore, keyPrefix string) *Service {
+func NewService(repo Repository, store ObjectStore, configStore ConfigStore, keyPrefix string) *Service {
 	prefix := strings.TrimSpace(keyPrefix)
 	prefix = strings.Trim(prefix, "/")
 
 	return &Service{
-		repo:      repo,
-		store:     store,
-		keyPrefix: prefix,
-		now:       time.Now,
+		repo:        repo,
+		store:       store,
+		configStore: configStore,
+		keyPrefix:   prefix,
+		now:         time.Now,
 	}
 }
 
@@ -82,9 +84,17 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 
 	now := s.now().UTC()
 	playedAt := time.UnixMilli(parsed.PlayedAt).UTC()
-	objectKey := buildObjectKey(s.keyPrefix, playedAt, hash)
-	if err := s.store.Put(ctx, objectKey, raw); err != nil {
-		return SyncResult{}, fmt.Errorf("store object: %w", err)
+
+	var objectKey string
+	storeInR2, storeErr := s.shouldStoreInR2(ctx, parsed)
+	if storeErr != nil {
+		return SyncResult{}, fmt.Errorf("check r2 storage policy: %w", storeErr)
+	}
+	if storeInR2 && s.store != nil {
+		objectKey = buildObjectKey(s.keyPrefix, playedAt, hash)
+		if err := s.store.Put(ctx, objectKey, raw); err != nil {
+			return SyncResult{}, fmt.Errorf("store object: %w", err)
+		}
 	}
 
 	meta := RunMetadata{
@@ -111,12 +121,16 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 
 	inserted, err := s.repo.InsertRun(ctx, meta)
 	if err != nil {
-		_ = s.store.Delete(ctx, objectKey)
+		if objectKey != "" && s.store != nil {
+			_ = s.store.Delete(ctx, objectKey)
+		}
 		return SyncResult{}, fmt.Errorf("persist metadata: %w", err)
 	}
 
 	if !inserted {
-		_ = s.store.Delete(ctx, objectKey)
+		if objectKey != "" && s.store != nil {
+			_ = s.store.Delete(ctx, objectKey)
+		}
 		return duplicateSyncResult(hash, parsedFileName, parsed.PlayedAt, sizeBytes), nil
 	}
 
@@ -128,6 +142,31 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		PlayedAt:       parsed.PlayedAt,
 		SizeBytes:      sizeBytes,
 	}, nil
+}
+
+// shouldStoreInR2 checks the current run sync settings to decide whether the
+// raw .refleks payload should be uploaded to object storage.
+func (s *Service) shouldStoreInR2(ctx context.Context, parsed ParsedRefleksFile) (bool, error) {
+	if s.configStore == nil {
+		return s.store != nil, nil
+	}
+
+	settings, err := s.configStore.Load(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	if !settings.StoreRunsEnabled {
+		return false, nil
+	}
+	if settings.StoreAnonOnly && strings.TrimSpace(parsed.SteamID) == "" {
+		return false, nil
+	}
+	if settings.StoreWithMouseTraceOnly && !parsed.HasMouseTrace {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func duplicateSyncResult(hash, fileName string, playedAt, sizeBytes int64) SyncResult {
@@ -180,6 +219,9 @@ func (s *Service) DownloadRaw(ctx context.Context, hash string) (RawDownload, er
 	if err != nil {
 		return RawDownload{}, err
 	}
+	if run.ObjectKey == "" {
+		return RawDownload{}, ErrObjectNotFound
+	}
 	body, size, err := s.store.Get(ctx, run.ObjectKey)
 	if err != nil {
 		return RawDownload{}, err
@@ -210,6 +252,9 @@ func (s *Service) DownloadRawURL(ctx context.Context, hash string) (RawDownloadL
 	run, err := s.repo.RunByHash(ctx, normalized)
 	if err != nil {
 		return RawDownloadLink{}, err
+	}
+	if run.ObjectKey == "" {
+		return RawDownloadLink{}, ErrObjectNotFound
 	}
 
 	fileName := strings.TrimSpace(run.FileName)

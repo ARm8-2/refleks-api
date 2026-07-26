@@ -239,7 +239,7 @@ func TestServiceSyncOne_DeduplicatesByHash(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 	svc.now = func() time.Time {
 		return time.Date(2026, 3, 22, 12, 0, 0, 0, time.UTC)
 	}
@@ -279,7 +279,7 @@ func TestServiceMissingHashes_ReturnsOnlyNotPersisted(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "sample.refleks", 1742640000000)
 	inserted, err := svc.SyncOne(context.Background(), raw)
@@ -303,7 +303,7 @@ func TestServiceMissingHashes_ReturnsOnlyNotPersisted(t *testing.T) {
 func TestServiceMissingHashes_InvalidHash(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
 	_, err := svc.MissingHashes(context.Background(), []string{"not-a-hash"})
 	if !errors.Is(err, ErrInvalidHash) {
 		t.Fatalf("expected ErrInvalidHash, got %v", err)
@@ -315,7 +315,7 @@ func TestServiceDownloadRaw_Success(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "download.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)
@@ -344,7 +344,7 @@ func TestServiceDownloadRaw_Success(t *testing.T) {
 func TestServiceDownloadRaw_NotFound(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
 	_, err := svc.DownloadRaw(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
@@ -356,7 +356,7 @@ func TestServiceDownloadRawURL_Success(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "download-url.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)
@@ -411,7 +411,7 @@ func TestServiceListRuns_FilterSortPagination(t *testing.T) {
 		Score:         float64PtrTest(70),
 	}
 
-	svc := NewService(repo, newMemStore(), "runs")
+	svc := NewService(repo, newMemStore(), nil, "runs")
 	resp, err := svc.ListRuns(context.Background(), RunListRequest{
 		Limit:        1,
 		Sort:         RunsSortScoreDesc,
@@ -438,7 +438,7 @@ func TestServiceSyncOne_AppendsMissingFileExtension(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "no-extension", 1742640000000)
 	result, err := svc.SyncOne(context.Background(), raw)
@@ -484,7 +484,7 @@ func TestServiceSyncOne_DeletesUploadedObjectWhenInsertConflicts(t *testing.T) {
 	t.Parallel()
 
 	store := newMemStore()
-	svc := NewService(lateConflictRepo{}, store, "runs")
+	svc := NewService(lateConflictRepo{}, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "sample.refleks", 1742640000000)
 	result, err := svc.SyncOne(context.Background(), raw)
@@ -513,7 +513,7 @@ func TestServiceGetRun_Success(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "detail.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)
@@ -536,7 +536,7 @@ func TestServiceGetRun_Success(t *testing.T) {
 func TestServiceGetRun_NotFound(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
 	_, err := svc.GetRun(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
@@ -546,7 +546,7 @@ func TestServiceGetRun_NotFound(t *testing.T) {
 func TestServiceGetRun_InvalidHash(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
 	_, err := svc.GetRun(context.Background(), "not-a-hash")
 	if !errors.Is(err, ErrInvalidHash) {
 		t.Fatalf("expected ErrInvalidHash, got %v", err)

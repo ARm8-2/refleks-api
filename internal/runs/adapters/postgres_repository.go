@@ -398,7 +398,7 @@ func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 		meta.FileName,
 		meta.PlayedAt,
 		meta.SizeBytes,
-		meta.ObjectKey,
+		nullIfEmpty(meta.ObjectKey),
 		meta.FormatVersion,
 		meta.Score,
 		meta.Accuracy,

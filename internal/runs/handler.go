@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,12 +34,13 @@ func DefaultHandlerConfig() HandlerConfig {
 
 // Handler exposes HTTP endpoints for run sync.
 type Handler struct {
-	service *Service
-	cfg     HandlerConfig
+	service     *Service
+	cfg         HandlerConfig
+	configStore ConfigStore
 }
 
 // NewHandler constructs a sync handler.
-func NewHandler(service *Service, cfg HandlerConfig) *Handler {
+func NewHandler(service *Service, cfg HandlerConfig, configStore ConfigStore) *Handler {
 	defaults := DefaultHandlerConfig()
 	if cfg.MaxSingleFileBytes <= 0 {
 		cfg.MaxSingleFileBytes = defaults.MaxSingleFileBytes
@@ -53,11 +55,27 @@ func NewHandler(service *Service, cfg HandlerConfig) *Handler {
 		cfg.MaxMissingHashes = defaults.MaxMissingHashes
 	}
 
-	return &Handler{service: service, cfg: cfg}
+	return &Handler{service: service, cfg: cfg, configStore: configStore}
+}
+
+func (h *Handler) checkSyncEnabled(ctx context.Context) bool {
+	if h.configStore == nil {
+		return true
+	}
+	settings, err := h.configStore.Load(ctx)
+	if err != nil {
+		return true
+	}
+	return settings.SyncEnabled
 }
 
 // HandleSync ingests one .refleks payload.
 func (h *Handler) HandleSync(w http.ResponseWriter, r *http.Request) {
+	if !h.checkSyncEnabled(r.Context()) {
+		writeError(w, http.StatusServiceUnavailable, "run sync is disabled")
+		return
+	}
+
 	fileName, raw, err := h.readSingleUpload(w, r)
 	if err != nil {
 		h.writeUploadError(w, err)
@@ -76,6 +94,11 @@ func (h *Handler) HandleSync(w http.ResponseWriter, r *http.Request) {
 
 // HandleBulkSync ingests multiple .refleks payloads in one request.
 func (h *Handler) HandleBulkSync(w http.ResponseWriter, r *http.Request) {
+	if !h.checkSyncEnabled(r.Context()) {
+		writeError(w, http.StatusServiceUnavailable, "run sync is disabled")
+		return
+	}
+
 	contentType := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
 	if !strings.HasPrefix(contentType, "multipart/form-data") {
 		writeError(w, http.StatusBadRequest, "bulk sync requires multipart/form-data with files[]")
@@ -153,6 +176,10 @@ func (h *Handler) HandleBulkSync(w http.ResponseWriter, r *http.Request) {
 
 // HandleMissingHashes returns which client-provided hashes are not yet synced.
 func (h *Handler) HandleMissingHashes(w http.ResponseWriter, r *http.Request) {
+	if !h.checkSyncEnabled(r.Context()) {
+		writeError(w, http.StatusServiceUnavailable, "run sync is disabled")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	defer r.Body.Close()
 

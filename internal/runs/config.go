@@ -1,0 +1,107 @@
+package runs
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// RunSyncSettings are runtime-togglable options for run sync behavior.
+// Each field maps to a row in the run_sync_config table.
+type RunSyncSettings struct {
+	SyncEnabled             bool
+	StoreRunsEnabled        bool
+	StoreAnonOnly           bool
+	StoreWithMouseTraceOnly bool
+}
+
+// DefaultRunSyncSettings returns the default settings.
+func DefaultRunSyncSettings() RunSyncSettings {
+	return RunSyncSettings{
+		SyncEnabled:             true,
+		StoreRunsEnabled:        true,
+		StoreAnonOnly:           false,
+		StoreWithMouseTraceOnly: false,
+	}
+}
+
+// PGConfigStore reads and seeds run sync settings from the database.
+// This follows the same pattern as worker_job_config in the worker.
+type PGConfigStore struct {
+	pool *pgxpool.Pool
+}
+
+// NewPGConfigStore creates a run sync config store.
+func NewPGConfigStore(pool *pgxpool.Pool) *PGConfigStore {
+	return &PGConfigStore{pool: pool}
+}
+
+// Seed inserts default settings for any keys not already in the table.
+// Existing rows are left untouched so manual DB edits are preserved.
+func (s *PGConfigStore) Seed(ctx context.Context, defaults map[string]bool) error {
+	for key, value := range defaults {
+		_, err := s.pool.Exec(ctx, `
+			INSERT INTO run_sync_config (key, value)
+			VALUES ($1, $2)
+			ON CONFLICT (key) DO NOTHING
+		`, key, value)
+		if err != nil {
+			return fmt.Errorf("seed run sync config %q: %w", key, err)
+		}
+	}
+	return nil
+}
+
+// Load reads the current run sync settings from the database.
+// Missing keys are treated as their defaults.
+func (s *PGConfigStore) Load(ctx context.Context) (RunSyncSettings, error) {
+	out := DefaultRunSyncSettings()
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT key, value
+		FROM run_sync_config
+		ORDER BY key
+	`)
+	if err != nil {
+		return RunSyncSettings{}, fmt.Errorf("load run sync config: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var key string
+		var value bool
+		if err := rows.Scan(&key, &value); err != nil {
+			return RunSyncSettings{}, fmt.Errorf("scan run sync config: %w", err)
+		}
+		switch key {
+		case "sync_enabled":
+			out.SyncEnabled = value
+		case "store_runs_enabled":
+			out.StoreRunsEnabled = value
+		case "store_anon_only":
+			out.StoreAnonOnly = value
+		case "store_with_mouse_trace_only":
+			out.StoreWithMouseTraceOnly = value
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return RunSyncSettings{}, fmt.Errorf("iterate run sync config: %w", err)
+	}
+
+	return out, nil
+}
+
+// now is a stub for testing.
+var configNow = time.Now
+
+// DefaultRunSyncSettingsMap returns the default key-value pairs for run_sync_config.
+func DefaultRunSyncSettingsMap() map[string]bool {
+	return map[string]bool{
+		"sync_enabled":                true,
+		"store_runs_enabled":          true,
+		"store_anon_only":             false,
+		"store_with_mouse_trace_only": false,
+	}
+}
