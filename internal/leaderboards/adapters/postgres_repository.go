@@ -42,7 +42,7 @@ func (r *PostgresRepository) ScenarioLeaderboard(ctx context.Context, req leader
 		SELECT
 			sl.rank,
 			sl.best_score,
-			sl.best_epoch_milli,
+			sl.best_played_at,
 			p.steam_id,
 			p.steam_username
 		FROM scenario_leaderboard_current sl
@@ -59,15 +59,15 @@ func (r *PostgresRepository) ScenarioLeaderboard(ctx context.Context, req leader
 	entries := make([]leaderboards.ScenarioEntry, 0, req.Limit+1)
 	for rows.Next() {
 		var entry leaderboards.ScenarioEntry
-		var bestEpoch sql.NullInt64
+		var bestPlayedAt sql.NullTime
 		var steamUsername sql.NullString
 
-		if err := rows.Scan(&entry.Rank, &entry.BestScore, &bestEpoch, &entry.SteamID, &steamUsername); err != nil {
+		if err := rows.Scan(&entry.Rank, &entry.BestScore, &bestPlayedAt, &entry.SteamID, &steamUsername); err != nil {
 			return leaderboards.ScenarioLeaderboardResponse{}, err
 		}
-		if bestEpoch.Valid {
-			copy := bestEpoch.Int64
-			entry.BestEpochMilli = &copy
+		if bestPlayedAt.Valid {
+			copy := bestPlayedAt.Time.UnixMilli()
+			entry.BestPlayedAt = &copy
 		}
 		if steamUsername.Valid {
 			entry.SteamUsername = steamUsername.String
@@ -119,7 +119,7 @@ func (r *PostgresRepository) BenchmarkDifficultyLeaderboard(ctx context.Context,
 			l.rank,
 			l.composite_score,
 			l.matched_scenarios,
-			l.last_epoch_milli,
+			l.last_played_at,
 			p.steam_id,
 			p.steam_username
 		FROM benchmark_difficulty_leaderboard_current l
@@ -136,22 +136,22 @@ func (r *PostgresRepository) BenchmarkDifficultyLeaderboard(ctx context.Context,
 	entries := make([]leaderboards.BenchmarkDifficultyEntry, 0, req.Limit+1)
 	for rows.Next() {
 		var entry leaderboards.BenchmarkDifficultyEntry
-		var lastEpoch sql.NullInt64
+		var lastPlayedAt sql.NullTime
 		var steamUsername sql.NullString
 
 		if err := rows.Scan(
 			&entry.Rank,
 			&entry.CompositeScore,
 			&entry.MatchedScenarios,
-			&lastEpoch,
+			&lastPlayedAt,
 			&entry.SteamID,
 			&steamUsername,
 		); err != nil {
 			return leaderboards.BenchmarkDifficultyLeaderboardResponse{}, err
 		}
-		if lastEpoch.Valid {
-			copy := lastEpoch.Int64
-			entry.LastEpochMilli = &copy
+		if lastPlayedAt.Valid {
+			copy := lastPlayedAt.Time.UnixMilli()
+			entry.LastPlayedAt = &copy
 		}
 		if steamUsername.Valid {
 			entry.SteamUsername = steamUsername.String

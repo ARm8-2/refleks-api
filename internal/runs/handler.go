@@ -289,14 +289,24 @@ func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "max_accuracy must be a number")
 		return
 	}
-	fromEpoch, err := optionalInt64Query(q.Get("from_epoch"))
+	fromPlayedAt, err := optionalInt64Query(q.Get("from_played_at"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "from_epoch must be an integer")
+		writeError(w, http.StatusBadRequest, "from_played_at must be an integer")
 		return
 	}
-	toEpoch, err := optionalInt64Query(q.Get("to_epoch"))
+	toPlayedAt, err := optionalInt64Query(q.Get("to_played_at"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "to_epoch must be an integer")
+		writeError(w, http.StatusBadRequest, "to_played_at must be an integer")
+		return
+	}
+	fromUploaded, err := optionalInt64Query(q.Get("from_uploaded"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "from_uploaded must be an integer")
+		return
+	}
+	toUploaded, err := optionalInt64Query(q.Get("to_uploaded"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "to_uploaded must be an integer")
 		return
 	}
 	hasMouseTrace, err := optionalBoolQuery(q.Get("has_mouse_trace"))
@@ -329,8 +339,10 @@ func (h *Handler) HandleListRuns(w http.ResponseWriter, r *http.Request) {
 		MaxScore:      maxScore,
 		MinAccuracy:   minAccuracy,
 		MaxAccuracy:   maxAccuracy,
-		FromEpoch:     fromEpoch,
-		ToEpoch:       toEpoch,
+		FromPlayedAt:  fromPlayedAt,
+		ToPlayedAt:    toPlayedAt,
+		FromUploaded:  fromUploaded,
+		ToUploaded:    toUploaded,
 	})
 	if err != nil {
 		h.writeServiceError(w, err)

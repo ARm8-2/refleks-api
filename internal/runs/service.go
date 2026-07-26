@@ -77,11 +77,12 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		return SyncResult{}, fmt.Errorf("query existing hash: %w", err)
 	}
 	if _, ok := existing[hash]; ok {
-		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
+		return duplicateSyncResult(hash, parsedFileName, parsed.PlayedAt, sizeBytes), nil
 	}
 
-	uploadedAt := s.now().UTC()
-	objectKey := buildObjectKey(s.keyPrefix, parsed.EpochMilli, hash, uploadedAt)
+	now := s.now().UTC()
+	playedAt := time.UnixMilli(parsed.PlayedAt).UTC()
+	objectKey := buildObjectKey(s.keyPrefix, playedAt, hash)
 	if err := s.store.Put(ctx, objectKey, raw); err != nil {
 		return SyncResult{}, fmt.Errorf("store object: %w", err)
 	}
@@ -92,10 +93,10 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		ScenarioName:  strings.TrimSpace(parsed.ScenarioName),
 		SteamID:       strings.TrimSpace(parsed.SteamID),
 		SteamUsername: strings.TrimSpace(parsed.SteamUsername),
-		EpochMilli:    parsed.EpochMilli,
+		PlayedAt:      playedAt,
 		SizeBytes:     sizeBytes,
 		ObjectKey:     objectKey,
-		UploadedAt:    uploadedAt,
+		UploadedAt:    now,
 		FormatVersion: parsed.FormatVersion,
 		Score:         parsed.Score,
 		Accuracy:      parsed.Accuracy,
@@ -116,7 +117,7 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 
 	if !inserted {
 		_ = s.store.Delete(ctx, objectKey)
-		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
+		return duplicateSyncResult(hash, parsedFileName, parsed.PlayedAt, sizeBytes), nil
 	}
 
 	return SyncResult{
@@ -124,18 +125,18 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		AlreadyPresent: false,
 		Stored:         true,
 		FileName:       parsedFileName,
-		EpochMilli:     parsed.EpochMilli,
+		PlayedAt:       parsed.PlayedAt,
 		SizeBytes:      sizeBytes,
 	}, nil
 }
 
-func duplicateSyncResult(hash, fileName string, epochMilli, sizeBytes int64) SyncResult {
+func duplicateSyncResult(hash, fileName string, playedAt, sizeBytes int64) SyncResult {
 	return SyncResult{
 		Hash:           hash,
 		AlreadyPresent: true,
 		Stored:         false,
 		FileName:       fileName,
-		EpochMilli:     epochMilli,
+		PlayedAt:       playedAt,
 		SizeBytes:      sizeBytes,
 	}
 }
@@ -325,7 +326,7 @@ func normalizeRunListRequest(req RunListRequest) RunListRequest {
 
 	switch out.Sort {
 	case RunsSortUploadedAtAsc, RunsSortUploadedAtDesc,
-		RunsSortEpochAsc, RunsSortEpochDesc,
+		RunsSortPlayedAtAsc, RunsSortPlayedAtDesc,
 		RunsSortScoreAsc, RunsSortScoreDesc,
 		RunsSortAccuracyAsc, RunsSortAccuracyDesc,
 		RunsSortAvgTTKAsc, RunsSortAvgTTKDesc:
@@ -339,20 +340,19 @@ func normalizeRunListRequest(req RunListRequest) RunListRequest {
 	if out.MinAccuracy != nil && out.MaxAccuracy != nil && *out.MinAccuracy > *out.MaxAccuracy {
 		out.MinAccuracy, out.MaxAccuracy = out.MaxAccuracy, out.MinAccuracy
 	}
-	if out.FromEpoch != nil && out.ToEpoch != nil && *out.FromEpoch > *out.ToEpoch {
-		out.FromEpoch, out.ToEpoch = out.ToEpoch, out.FromEpoch
+	if out.FromPlayedAt != nil && out.ToPlayedAt != nil && *out.FromPlayedAt > *out.ToPlayedAt {
+		out.FromPlayedAt, out.ToPlayedAt = out.ToPlayedAt, out.FromPlayedAt
+	}
+	if out.FromUploaded != nil && out.ToUploaded != nil && *out.FromUploaded > *out.ToUploaded {
+		out.FromUploaded, out.ToUploaded = out.ToUploaded, out.FromUploaded
 	}
 
 	return out
 }
 
-func buildObjectKey(prefix string, epochMilli int64, hash string, fallback time.Time) string {
+func buildObjectKey(prefix string, playedAt time.Time, hash string) string {
 	name := hash + RunFileExtension
-	day := fallback.UTC()
-	if epochMilli > 0 {
-		day = time.UnixMilli(epochMilli).UTC()
-	}
-	datePath := day.Format("2006/01/02")
+	datePath := playedAt.Format("2006/01/02")
 	if prefix == "" {
 		return datePath + "/" + name
 	}
