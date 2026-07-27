@@ -119,12 +119,6 @@ func run() error {
 		}
 
 		runConfigStore := runs.NewPGConfigStore(databaseClient.Pool())
-		seedCtx, seedCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := runConfigStore.Seed(seedCtx, runs.DefaultRunSyncSettingsMap()); err != nil {
-			seedCancel()
-			return fmt.Errorf("seed run sync config: %w", err)
-		}
-		seedCancel()
 
 		// Read-only run service: store is not needed for browse/get endpoints.
 		readSvc := runs.NewService(runRepo, nil, runConfigStore, "")

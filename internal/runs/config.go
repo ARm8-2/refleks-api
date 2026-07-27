@@ -3,7 +3,6 @@ package runs
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -27,8 +26,7 @@ func DefaultRunSyncSettings() RunSyncSettings {
 	}
 }
 
-// PGConfigStore reads and seeds run sync settings from the database.
-// This follows the same pattern as worker_job_config in the worker.
+// PGConfigStore reads run sync settings from the database.
 type PGConfigStore struct {
 	pool *pgxpool.Pool
 }
@@ -36,22 +34,6 @@ type PGConfigStore struct {
 // NewPGConfigStore creates a run sync config store.
 func NewPGConfigStore(pool *pgxpool.Pool) *PGConfigStore {
 	return &PGConfigStore{pool: pool}
-}
-
-// Seed inserts default settings for any keys not already in the table.
-// Existing rows are left untouched so manual DB edits are preserved.
-func (s *PGConfigStore) Seed(ctx context.Context, defaults map[string]bool) error {
-	for key, value := range defaults {
-		_, err := s.pool.Exec(ctx, `
-			INSERT INTO run_sync_config (key, value)
-			VALUES ($1, $2)
-			ON CONFLICT (key) DO NOTHING
-		`, key, value)
-		if err != nil {
-			return fmt.Errorf("seed run sync config %q: %w", key, err)
-		}
-	}
-	return nil
 }
 
 // Load reads the current run sync settings from the database.
@@ -91,17 +73,4 @@ func (s *PGConfigStore) Load(ctx context.Context) (RunSyncSettings, error) {
 	}
 
 	return out, nil
-}
-
-// now is a stub for testing.
-var configNow = time.Now
-
-// DefaultRunSyncSettingsMap returns the default key-value pairs for run_sync_config.
-func DefaultRunSyncSettingsMap() map[string]bool {
-	return map[string]bool{
-		"sync_enabled":                true,
-		"store_runs_enabled":          true,
-		"store_anon_only":             false,
-		"store_with_mouse_trace_only": false,
-	}
 }
