@@ -45,3 +45,8 @@ type DownloadURL struct {
 	Access    string
 	ExpiresAt *time.Time
 }
+
+// ConfigStore reads runtime run sync settings from the database.
+type ConfigStore interface {
+	Load(ctx context.Context) (RunSyncSettings, error)
+}

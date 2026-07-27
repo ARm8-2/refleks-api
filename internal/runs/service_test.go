@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zeebo/xxh3"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 type memRepo struct {
@@ -52,8 +53,8 @@ func (m *memRepo) RunDetail(_ context.Context, hash string) (RunListItem, error)
 		ScenarioName:  meta.ScenarioName,
 		SteamID:       meta.SteamID,
 		SteamUsername: meta.SteamUsername,
-		EpochMilli:    meta.EpochMilli,
-		UploadedAt:    meta.UploadedAt,
+		PlayedAt:      meta.PlayedAt.UnixMilli(),
+		UploadedAt:    meta.UploadedAt.UnixMilli(),
 		SizeBytes:     meta.SizeBytes,
 		Score:         meta.Score,
 		Accuracy:      meta.Accuracy,
@@ -84,8 +85,8 @@ func (m *memRepo) ListRuns(_ context.Context, req RunListRequest) ([]RunListItem
 			ScenarioName:  meta.ScenarioName,
 			SteamID:       meta.SteamID,
 			SteamUsername: meta.SteamUsername,
-			EpochMilli:    meta.EpochMilli,
-			UploadedAt:    meta.UploadedAt,
+			PlayedAt:      meta.PlayedAt.UnixMilli(),
+			UploadedAt:    meta.UploadedAt.UnixMilli(),
 			SizeBytes:     meta.SizeBytes,
 			Score:         meta.Score,
 			Accuracy:      meta.Accuracy,
@@ -126,10 +127,16 @@ func (m *memRepo) ListRuns(_ context.Context, req RunListRequest) ([]RunListItem
 				continue
 			}
 		}
-		if req.FromEpoch != nil && item.EpochMilli < *req.FromEpoch {
+		if req.FromPlayedAt != nil && item.PlayedAt < *req.FromPlayedAt {
 			continue
 		}
-		if req.ToEpoch != nil && item.EpochMilli > *req.ToEpoch {
+		if req.ToPlayedAt != nil && item.PlayedAt > *req.ToPlayedAt {
+			continue
+		}
+		if req.FromUploaded != nil && item.UploadedAt < *req.FromUploaded {
+			continue
+		}
+		if req.ToUploaded != nil && item.UploadedAt > *req.ToUploaded {
 			continue
 		}
 
@@ -141,20 +148,20 @@ func (m *memRepo) ListRuns(_ context.Context, req RunListRequest) ([]RunListItem
 		b := items[j]
 		switch req.Sort {
 		case RunsSortUploadedAtAsc:
-			if a.UploadedAt.Equal(b.UploadedAt) {
+			if a.UploadedAt == b.UploadedAt {
 				return a.Hash < b.Hash
 			}
-			return a.UploadedAt.Before(b.UploadedAt)
-		case RunsSortEpochDesc:
-			if a.EpochMilli == b.EpochMilli {
+			return a.UploadedAt < b.UploadedAt
+		case RunsSortPlayedAtDesc:
+			if a.PlayedAt == b.PlayedAt {
 				return a.Hash < b.Hash
 			}
-			return a.EpochMilli > b.EpochMilli
-		case RunsSortEpochAsc:
-			if a.EpochMilli == b.EpochMilli {
+			return a.PlayedAt > b.PlayedAt
+		case RunsSortPlayedAtAsc:
+			if a.PlayedAt == b.PlayedAt {
 				return a.Hash < b.Hash
 			}
-			return a.EpochMilli < b.EpochMilli
+			return a.PlayedAt < b.PlayedAt
 		case RunsSortScoreDesc:
 			av := scoreOrNegInf(a.Score)
 			bv := scoreOrNegInf(b.Score)
@@ -170,10 +177,10 @@ func (m *memRepo) ListRuns(_ context.Context, req RunListRequest) ([]RunListItem
 			}
 			return av < bv
 		default:
-			if a.UploadedAt.Equal(b.UploadedAt) {
+			if a.UploadedAt == b.UploadedAt {
 				return a.Hash < b.Hash
 			}
-			return a.UploadedAt.After(b.UploadedAt)
+			return a.UploadedAt > b.UploadedAt
 		}
 	})
 
@@ -232,7 +239,7 @@ func TestServiceSyncOne_DeduplicatesByHash(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 	svc.now = func() time.Time {
 		return time.Date(2026, 3, 22, 12, 0, 0, 0, time.UTC)
 	}
@@ -272,7 +279,7 @@ func TestServiceMissingHashes_ReturnsOnlyNotPersisted(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "sample.refleks", 1742640000000)
 	inserted, err := svc.SyncOne(context.Background(), raw)
@@ -296,7 +303,7 @@ func TestServiceMissingHashes_ReturnsOnlyNotPersisted(t *testing.T) {
 func TestServiceMissingHashes_InvalidHash(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
 	_, err := svc.MissingHashes(context.Background(), []string{"not-a-hash"})
 	if !errors.Is(err, ErrInvalidHash) {
 		t.Fatalf("expected ErrInvalidHash, got %v", err)
@@ -308,7 +315,7 @@ func TestServiceDownloadRaw_Success(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "download.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)
@@ -337,7 +344,7 @@ func TestServiceDownloadRaw_Success(t *testing.T) {
 func TestServiceDownloadRaw_NotFound(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
 	_, err := svc.DownloadRaw(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
@@ -349,7 +356,7 @@ func TestServiceDownloadRawURL_Success(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "download-url.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)
@@ -381,8 +388,8 @@ func TestServiceListRuns_FilterSortPagination(t *testing.T) {
 		FileName:      "run-1.refleks",
 		ScenarioName:  "VT Pat",
 		SteamUsername: "alice",
-		EpochMilli:    2000,
-		UploadedAt:    time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC),
+		PlayedAt:      time.UnixMilli(2000),
+		UploadedAt:    time.UnixMilli(1774519200000),
 		Score:         float64PtrTest(88),
 	}
 	repo.runs["h2"] = RunMetadata{
@@ -390,8 +397,8 @@ func TestServiceListRuns_FilterSortPagination(t *testing.T) {
 		FileName:      "run-2.refleks",
 		ScenarioName:  "VT Pat",
 		SteamUsername: "alice",
-		EpochMilli:    3000,
-		UploadedAt:    time.Date(2026, 3, 25, 11, 0, 0, 0, time.UTC),
+		PlayedAt:      time.UnixMilli(3000),
+		UploadedAt:    time.UnixMilli(1774522800000),
 		Score:         float64PtrTest(99),
 	}
 	repo.runs["h3"] = RunMetadata{
@@ -399,12 +406,12 @@ func TestServiceListRuns_FilterSortPagination(t *testing.T) {
 		FileName:      "run-3.refleks",
 		ScenarioName:  "Other",
 		SteamUsername: "bob",
-		EpochMilli:    1000,
-		UploadedAt:    time.Date(2026, 3, 25, 9, 0, 0, 0, time.UTC),
+		PlayedAt:      time.UnixMilli(1000),
+		UploadedAt:    time.UnixMilli(1774515600000),
 		Score:         float64PtrTest(70),
 	}
 
-	svc := NewService(repo, newMemStore(), "runs")
+	svc := NewService(repo, newMemStore(), nil, "runs")
 	resp, err := svc.ListRuns(context.Background(), RunListRequest{
 		Limit:        1,
 		Sort:         RunsSortScoreDesc,
@@ -431,7 +438,7 @@ func TestServiceSyncOne_AppendsMissingFileExtension(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "no-extension", 1742640000000)
 	result, err := svc.SyncOne(context.Background(), raw)
@@ -477,7 +484,7 @@ func TestServiceSyncOne_DeletesUploadedObjectWhenInsertConflicts(t *testing.T) {
 	t.Parallel()
 
 	store := newMemStore()
-	svc := NewService(lateConflictRepo{}, store, "runs")
+	svc := NewService(lateConflictRepo{}, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "sample.refleks", 1742640000000)
 	result, err := svc.SyncOne(context.Background(), raw)
@@ -506,7 +513,7 @@ func TestServiceGetRun_Success(t *testing.T) {
 
 	repo := newMemRepo()
 	store := newMemStore()
-	svc := NewService(repo, store, "runs")
+	svc := NewService(repo, store, nil, "runs")
 
 	raw := buildTestRefleksFile(t, "detail.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)
@@ -529,7 +536,7 @@ func TestServiceGetRun_Success(t *testing.T) {
 func TestServiceGetRun_NotFound(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
 	_, err := svc.GetRun(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if !errors.Is(err, ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
@@ -539,7 +546,7 @@ func TestServiceGetRun_NotFound(t *testing.T) {
 func TestServiceGetRun_InvalidHash(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
 	_, err := svc.GetRun(context.Background(), "not-a-hash")
 	if !errors.Is(err, ErrInvalidHash) {
 		t.Fatalf("expected ErrInvalidHash, got %v", err)
@@ -566,8 +573,53 @@ func buildTestRefleksFile(t *testing.T, fileName string, epochMilli int64) []byt
 	return buildTestRefleksFileWithStats(t, fileName, epochMilli, nil)
 }
 
+// testStatToField maps human-readable stat keys to protowire field numbers.
+var testStatToField = map[string]struct {
+	field    protowire.Number
+	isVarint bool
+}{
+	"Scenario":     {field: 19},
+	"Score":        {field: 1},
+	"Accuracy":     {field: 44},
+	"Real Avg TTK": {field: 45},
+	"Avg TTK":      {field: 6},
+	"Duration":     {field: 47},
+	"cm/360":       {field: 46},
+	"Kills":        {field: 2, isVarint: true},
+	"Deaths":       {field: 3, isVarint: true},
+	"Damage Done":  {field: 7},
+	"Hit Count":    {field: 10, isVarint: true},
+}
+
 func buildTestRefleksFileWithStats(t *testing.T, fileName string, epochMilli int64, stats []testStatEntry) []byte {
 	t.Helper()
+
+	// Build stats section payload (protowire RunStatsData, field 1 = summary message)
+	var statsPayload []byte
+	if len(stats) > 0 {
+		// Build summary message (RunStatsSummary)
+		var summaryBuf []byte
+		for _, stat := range stats {
+			mapping, ok := testStatToField[stat.Key]
+			if !ok {
+				continue
+			}
+			switch stat.Type {
+			case 1: // statTypeString (string)
+				summaryBuf = protowire.AppendTag(summaryBuf, mapping.field, protowire.BytesType)
+				summaryBuf = protowire.AppendString(summaryBuf, stat.String)
+			case 2, 4: // statTypeInt or statTypeBool
+				summaryBuf = protowire.AppendTag(summaryBuf, mapping.field, protowire.VarintType)
+				summaryBuf = protowire.AppendVarint(summaryBuf, uint64(stat.Int))
+			case 3: // statTypeFloat
+				summaryBuf = protowire.AppendTag(summaryBuf, mapping.field, protowire.Fixed64Type)
+				summaryBuf = protowire.AppendFixed64(summaryBuf, math.Float64bits(stat.Float))
+			}
+		}
+		// Wrap summary in RunStatsData field 1
+		statsPayload = protowire.AppendTag(nil, 1, protowire.BytesType)
+		statsPayload = protowire.AppendBytes(statsPayload, summaryBuf)
+	}
 
 	payload := new(bytes.Buffer)
 	writeString := func(s string) {
@@ -580,78 +632,32 @@ func buildTestRefleksFileWithStats(t *testing.T, fileName string, epochMilli int
 		}
 	}
 
+	// Section 1: file name
 	writeString(fileName)
-	if err := binary.Write(payload, binary.LittleEndian, uint32(len(stats))); err != nil { // stats
-		t.Fatalf("write stats len: %v", err)
+
+	// Section 2: stats
+	if err := binary.Write(payload, binary.LittleEndian, uint32(len(statsPayload))); err != nil {
+		t.Fatalf("write stats size: %v", err)
 	}
-	for _, stat := range stats {
-		writeString(stat.Key)
-		if err := binary.Write(payload, binary.LittleEndian, stat.Type); err != nil {
-			t.Fatalf("write stat type: %v", err)
+	if len(statsPayload) > 0 {
+		if _, err := payload.Write(statsPayload); err != nil {
+			t.Fatalf("write stats body: %v", err)
 		}
-		switch stat.Type {
-		case statTypeString:
-			writeString(stat.String)
-		case statTypeInt:
-			if err := binary.Write(payload, binary.LittleEndian, stat.Int); err != nil {
-				t.Fatalf("write stat int: %v", err)
-			}
-		case statTypeFloat:
-			if err := binary.Write(payload, binary.LittleEndian, stat.Float); err != nil {
-				t.Fatalf("write stat float: %v", err)
-			}
-		case statTypeBool:
-			value := uint8(0)
-			if stat.Bool {
-				value = 1
-			}
-			if err := binary.Write(payload, binary.LittleEndian, value); err != nil {
-				t.Fatalf("write stat bool: %v", err)
-			}
-		default:
-			t.Fatalf("unsupported stat type: %d", stat.Type)
-		}
-	}
-	if err := binary.Write(payload, binary.LittleEndian, uint32(0)); err != nil { // events
-		t.Fatalf("write events rows: %v", err)
-	}
-	if err := binary.Write(payload, binary.LittleEndian, uint32(0)); err != nil { // mouse trace
-		t.Fatalf("write trace len: %v", err)
 	}
 
-	for i := 0; i < 7; i++ { // appVersion, os, arch, osVersion, steamID, personaName, cpuName
-		writeString("")
+	// Section 3: performances (empty)
+	if err := binary.Write(payload, binary.LittleEndian, uint32(0)); err != nil {
+		t.Fatalf("write performances size: %v", err)
 	}
-	if err := binary.Write(payload, binary.LittleEndian, int32(0)); err != nil { // cpu cores
-		t.Fatalf("write cpu cores: %v", err)
+
+	// Section 4: mouse trace (empty)
+	if err := binary.Write(payload, binary.LittleEndian, uint32(0)); err != nil {
+		t.Fatalf("write trace size: %v", err)
 	}
-	writeString("")                                                              // gpu name
-	if err := binary.Write(payload, binary.LittleEndian, int32(0)); err != nil { // ram
-		t.Fatalf("write ram: %v", err)
-	}
-	if err := binary.Write(payload, binary.LittleEndian, float64(0)); err != nil { // hz
-		t.Fatalf("write display hz: %v", err)
-	}
-	if err := binary.Write(payload, binary.LittleEndian, int32(0)); err != nil { // w
-		t.Fatalf("write width: %v", err)
-	}
-	if err := binary.Write(payload, binary.LittleEndian, int32(0)); err != nil { // h
-		t.Fatalf("write height: %v", err)
-	}
-	if err := binary.Write(payload, binary.LittleEndian, uint8(0)); err != nil { // windowed
-		t.Fatalf("write windowed: %v", err)
-	}
-	for i := 0; i < 5; i++ { // mouse strings
-		writeString("")
-	}
-	if err := binary.Write(payload, binary.LittleEndian, int32(0)); err != nil { // trace points
-		t.Fatalf("write trace points: %v", err)
-	}
-	if err := binary.Write(payload, binary.LittleEndian, float64(0)); err != nil { // duration
-		t.Fatalf("write trace duration: %v", err)
-	}
-	if err := binary.Write(payload, binary.LittleEndian, int32(0)); err != nil { // sample rate
-		t.Fatalf("write sample rate: %v", err)
+
+	// Section 5: environment (all empty)
+	if err := binary.Write(payload, binary.LittleEndian, uint32(0)); err != nil {
+		t.Fatalf("write env size: %v", err)
 	}
 
 	encodedPayload := payload.Bytes()

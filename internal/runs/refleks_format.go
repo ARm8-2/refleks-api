@@ -11,28 +11,48 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/zeebo/xxh3"
+	"google.golang.org/protobuf/encoding/protowire"
 )
 
 const (
 	runMagic                 = "RFLK"
-	runVersion         uint8 = 1
+	runVersion         uint8 = 2
 	runCompressionNone uint8 = 0
 	runCompressionZstd uint8 = 1
 
 	runHeaderSize   = 4 + 1 + 1 + 8
 	runChecksumSize = 8
 
-	statTypeString uint8 = 1
-	statTypeInt    uint8 = 2
-	statTypeFloat  uint8 = 3
-	statTypeBool   uint8 = 4
-
 	maxFileNameBytes = 1024
-	maxStringBytes   = 1 << 20
-	maxStatsEntries  = 50000
-	maxEventRows     = 500000
-	maxEventCols     = 128
 	maxMousePoints   = 20000000
+)
+
+// ---- Field numbers (matches refleks/internal/runs/codec_protowire.go) ----
+
+// RunStatsData field numbers
+const (
+	statsFieldSummary = 1
+	statsFieldEvents  = 2
+)
+
+// RunStatsSummary field numbers
+const (
+	summaryFieldScenario   = 19
+	summaryFieldScore      = 1
+	summaryFieldAvgTTK     = 6
+	summaryFieldRealAvgTTK = 45
+	summaryFieldAccuracy   = 44
+	summaryFieldCm360      = 46
+	summaryFieldDuration   = 47
+)
+
+// RunEnvironment field numbers
+const (
+	envFieldSteamID     = 5
+	envFieldPersonaName = 6
+	envFieldMouseVID    = 16
+	envFieldMousePID    = 17
+	envFieldTracePoints = 20
 )
 
 type parsedStats struct {
@@ -68,7 +88,7 @@ func ParseRefleksFile(raw []byte) (ParsedRefleksFile, error) {
 
 	version := raw[4]
 	if version != runVersion {
-		return ParsedRefleksFile{}, fmt.Errorf("%w: unsupported version %d", ErrInvalidRunFile, version)
+		return ParsedRefleksFile{}, fmt.Errorf("%w: expected version %d, got %d", ErrInvalidRunFile, runVersion, version)
 	}
 
 	compression := raw[5]
@@ -83,7 +103,7 @@ func ParseRefleksFile(raw []byte) (ParsedRefleksFile, error) {
 	if err != nil {
 		return ParsedRefleksFile{}, err
 	}
-	parsed.EpochMilli = epoch
+	parsed.PlayedAt = epoch
 	parsed.FormatVersion = version
 	return parsed, nil
 }
@@ -108,14 +128,14 @@ func parsePayload(payload []byte, compression uint8) (ParsedRefleksFile, error) 
 	if err != nil {
 		return ParsedRefleksFile{}, fmt.Errorf("%w: stats: %v", ErrInvalidRunFile, err)
 	}
-	if err := skipEvents(decoded); err != nil {
-		return ParsedRefleksFile{}, fmt.Errorf("%w: events: %v", ErrInvalidRunFile, err)
+	if err := skipSection(decoded); err != nil {
+		return ParsedRefleksFile{}, fmt.Errorf("%w: performances: %v", ErrInvalidRunFile, err)
 	}
 	mouseMetrics, err := parseMouseMetrics(decoded)
 	if err != nil {
 		return ParsedRefleksFile{}, fmt.Errorf("%w: mouse trace: %v", ErrInvalidRunFile, err)
 	}
-	env, err := parseRunEnvironment(decoded)
+	env, err := parseEnvironment(decoded)
 	if err != nil {
 		return ParsedRefleksFile{}, fmt.Errorf("%w: environment: %v", ErrInvalidRunFile, err)
 	}
@@ -142,124 +162,152 @@ func parsePayload(payload []byte, compression uint8) (ParsedRefleksFile, error) 
 	}, nil
 }
 
+// ---- Section parsers ----
+
 func parseStats(r io.Reader) (parsedStats, error) {
-	count, err := readUint32(r)
-	if err != nil {
+	var size uint32
+	if err := binary.Read(r, binary.LittleEndian, &size); err != nil {
 		return parsedStats{}, err
 	}
-	if count > maxStatsEntries {
-		return parsedStats{}, fmt.Errorf("too many stats entries: %d", count)
+	if size == 0 {
+		return parsedStats{}, nil
 	}
-
-	out := parsedStats{}
-	for i := uint32(0); i < count; i++ {
-		key, err := readString(r, maxStringBytes)
-		if err != nil {
-			return parsedStats{}, err
-		}
-		t, err := readUint8(r)
-		if err != nil {
-			return parsedStats{}, err
-		}
-
-		var value any
-		switch t {
-		case statTypeString:
-			v, err := readString(r, maxStringBytes)
-			if err != nil {
-				return parsedStats{}, err
-			}
-			value = v
-		case statTypeInt:
-			v, err := readInt64(r)
-			if err != nil {
-				return parsedStats{}, err
-			}
-			value = v
-		case statTypeFloat:
-			v, err := readFloat64(r)
-			if err != nil {
-				return parsedStats{}, err
-			}
-			value = v
-		case statTypeBool:
-			if _, err := readUint8(r); err != nil {
-				return parsedStats{}, err
-			}
-			continue
-		default:
-			return parsedStats{}, fmt.Errorf("unknown stat type: %d", t)
-		}
-
-		normalizedKey := strings.ToLower(strings.TrimSpace(key))
-		switch normalizedKey {
-		case "scenario":
-			if s, ok := value.(string); ok {
-				out.ScenarioName = strings.TrimSpace(s)
-			}
-		case "score":
-			if v, ok := asFloat64(value); ok {
-				out.Score = float64Ptr(v)
-			}
-		case "accuracy":
-			if v, ok := asFloat64(value); ok {
-				out.Accuracy = float64Ptr(v)
-			}
-		case "real avg ttk", "avg ttk":
-			if v, ok := asFloat64(value); ok {
-				out.AvgTTKSeconds = float64Ptr(v)
-			}
-		case "duration":
-			if v, ok := asFloat64(value); ok {
-				out.DurationSecs = float64Ptr(v)
-			}
-		case "cm/360":
-			if v, ok := asFloat64(value); ok {
-				out.SensCM360 = float64Ptr(v)
-			}
-		}
+	data := make([]byte, size)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return parsedStats{}, err
 	}
-
-	return out, nil
+	return extractStatsSummary(data), nil
 }
 
-func skipEvents(r io.Reader) error {
-	rows, err := readUint32(r)
-	if err != nil {
-		return err
-	}
-	if rows > maxEventRows {
-		return fmt.Errorf("too many event rows: %d", rows)
-	}
-	for i := uint32(0); i < rows; i++ {
-		cols, err := readUint32(r)
-		if err != nil {
-			return err
+func extractStatsSummary(data []byte) parsedStats {
+	var summary []byte
+	// Walk RunStatsData: find field 1 (summary message).
+	for len(data) > 0 {
+		fn, wt, n := protowire.ConsumeTag(data)
+		if n < 0 {
+			break
 		}
-		if cols > maxEventCols {
-			return fmt.Errorf("too many event columns: %d", cols)
+		data = data[n:]
+		if fn == statsFieldSummary && wt == protowire.BytesType {
+			summary, n = protowire.ConsumeBytes(data)
+			if n < 0 {
+				break
+			}
+			data = data[n:]
+			break
 		}
-		for j := uint32(0); j < cols; j++ {
-			if _, err := readString(r, maxStringBytes); err != nil {
-				return err
+		consumed := protowire.ConsumeFieldValue(fn, wt, data)
+		if consumed < 0 {
+			break
+		}
+		data = data[consumed:]
+	}
+	if len(summary) == 0 {
+		return parsedStats{}
+	}
+	return extractSummaryFields(summary)
+}
+
+func extractSummaryFields(data []byte) parsedStats {
+	var s parsedStats
+	for len(data) > 0 {
+		fn, wt, n := protowire.ConsumeTag(data)
+		if n < 0 {
+			break
+		}
+		data = data[n:]
+		consumed := readSummaryField(fn, wt, data, &s)
+		if consumed == -1 {
+			break
+		}
+		data = data[consumed:]
+	}
+	return s
+}
+
+func readSummaryField(fn protowire.Number, wt protowire.Type, data []byte, s *parsedStats) int {
+	switch fn {
+	case summaryFieldScenario:
+		if wt == protowire.BytesType {
+			v, n := protowire.ConsumeString(data)
+			if n >= 0 {
+				s.ScenarioName = strings.TrimSpace(v)
+				return n
+			}
+		}
+	case summaryFieldScore:
+		if wt == protowire.Fixed64Type {
+			bits, n := protowire.ConsumeFixed64(data)
+			if n >= 0 {
+				v := math.Float64frombits(bits)
+				s.Score = float64Ptr(v)
+				return n
+			}
+		}
+	case summaryFieldAccuracy:
+		if wt == protowire.Fixed64Type {
+			bits, n := protowire.ConsumeFixed64(data)
+			if n >= 0 {
+				v := math.Float64frombits(bits)
+				s.Accuracy = float64Ptr(v)
+				return n
+			}
+		}
+	case summaryFieldAvgTTK, summaryFieldRealAvgTTK:
+		if wt == protowire.Fixed64Type {
+			bits, n := protowire.ConsumeFixed64(data)
+			if n >= 0 {
+				v := math.Float64frombits(bits)
+				s.AvgTTKSeconds = float64Ptr(v)
+				return n
+			}
+		}
+	case summaryFieldDuration:
+		if wt == protowire.Fixed64Type {
+			bits, n := protowire.ConsumeFixed64(data)
+			if n >= 0 {
+				v := math.Float64frombits(bits)
+				s.DurationSecs = float64Ptr(v)
+				return n
+			}
+		}
+	case summaryFieldCm360:
+		if wt == protowire.Fixed64Type {
+			bits, n := protowire.ConsumeFixed64(data)
+			if n >= 0 {
+				v := math.Float64frombits(bits)
+				s.SensCM360 = float64Ptr(v)
+				return n
 			}
 		}
 	}
-	return nil
+	// Field not matched or wrong type: skip it.
+	return protowire.ConsumeFieldValue(fn, wt, data)
 }
 
 func parseMouseMetrics(r io.Reader) (parsedMouseMetrics, error) {
-	count, err := readUint32(r)
-	if err != nil {
+	var size uint32
+	if err := binary.Read(r, binary.LittleEndian, &size); err != nil {
 		return parsedMouseMetrics{}, err
 	}
-	if count > maxMousePoints {
-		return parsedMouseMetrics{}, fmt.Errorf("too many mouse points: %d", count)
+	if size == 0 {
+		return parsedMouseMetrics{HasTrace: false}, nil
+	}
+	if size < 4 {
+		return parsedMouseMetrics{}, fmt.Errorf("mouse trace section too small: %d", size)
+	}
+	limited := io.LimitReader(r, int64(size))
+	var count uint32
+	if err := binary.Read(limited, binary.LittleEndian, &count); err != nil {
+		return parsedMouseMetrics{}, err
 	}
 
 	out := parsedMouseMetrics{HasTrace: count > 0}
 	if count == 0 {
 		return out, nil
+	}
+	if count > maxMousePoints {
+		return parsedMouseMetrics{}, fmt.Errorf("too many mouse points: %d", count)
 	}
 
 	var prevTS int64
@@ -270,21 +318,21 @@ func parseMouseMetrics(r io.Reader) (parsedMouseMetrics, error) {
 	var totalSeconds float64
 
 	for i := uint32(0); i < count; i++ {
-		ts, err := readInt64(r)
-		if err != nil {
+		var ts int64
+		var x, y, buttons int32
+		if err := binary.Read(limited, binary.LittleEndian, &ts); err != nil {
 			return parsedMouseMetrics{}, err
 		}
-		x, err := readInt32(r)
-		if err != nil {
+		if err := binary.Read(limited, binary.LittleEndian, &x); err != nil {
 			return parsedMouseMetrics{}, err
 		}
-		y, err := readInt32(r)
-		if err != nil {
+		if err := binary.Read(limited, binary.LittleEndian, &y); err != nil {
 			return parsedMouseMetrics{}, err
 		}
-		if _, err := readInt32(r); err != nil {
+		if err := binary.Read(limited, binary.LittleEndian, &buttons); err != nil {
 			return parsedMouseMetrics{}, err
 		}
+		_ = buttons
 
 		if hasPrev {
 			dtMillis := ts - prevTS
@@ -309,87 +357,99 @@ func parseMouseMetrics(r io.Reader) (parsedMouseMetrics, error) {
 	return out, nil
 }
 
-func parseRunEnvironment(r io.Reader) (parsedEnvironment, error) {
-	if _, err := readString(r, maxStringBytes); err != nil {
+func parseEnvironment(r io.Reader) (parsedEnvironment, error) {
+	var size uint32
+	if err := binary.Read(r, binary.LittleEndian, &size); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err := readString(r, maxStringBytes); err != nil {
+	if size == 0 {
+		return parsedEnvironment{}, nil
+	}
+	data := make([]byte, size)
+	if _, err := io.ReadFull(r, data); err != nil {
 		return parsedEnvironment{}, err
 	}
-	if _, err := readString(r, maxStringBytes); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readString(r, maxStringBytes); err != nil {
-		return parsedEnvironment{}, err
-	}
-	steamID, err := readString(r, maxStringBytes)
-	if err != nil {
-		return parsedEnvironment{}, err
-	}
-	steamUsername, err := readString(r, maxStringBytes)
-	if err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readString(r, maxStringBytes); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readInt32(r); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readString(r, maxStringBytes); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readInt32(r); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readFloat64(r); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readInt32(r); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readInt32(r); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readUint8(r); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readString(r, maxStringBytes); err != nil {
-		return parsedEnvironment{}, err
-	}
-	mouseVID, err := readString(r, maxStringBytes)
-	if err != nil {
-		return parsedEnvironment{}, err
-	}
-	mousePID, err := readString(r, maxStringBytes)
-	if err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readString(r, maxStringBytes); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readString(r, maxStringBytes); err != nil {
-		return parsedEnvironment{}, err
-	}
-	tracePoints, err := readInt32(r)
-	if err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readFloat64(r); err != nil {
-		return parsedEnvironment{}, err
-	}
-	if _, err := readInt32(r); err != nil {
-		return parsedEnvironment{}, err
-	}
-
-	return parsedEnvironment{
-		SteamID:       strings.TrimSpace(steamID),
-		SteamUsername: strings.TrimSpace(steamUsername),
-		MouseVID:      strings.TrimSpace(mouseVID),
-		MousePID:      strings.TrimSpace(mousePID),
-		TracePoints:   tracePoints,
-	}, nil
+	return extractEnvironment(data), nil
 }
+
+func extractEnvironment(data []byte) parsedEnvironment {
+	var env parsedEnvironment
+	for len(data) > 0 {
+		fn, wt, n := protowire.ConsumeTag(data)
+		if n < 0 {
+			break
+		}
+		data = data[n:]
+		consumed := readEnvironmentField(fn, wt, data, &env)
+		if consumed == -1 {
+			break
+		}
+		data = data[consumed:]
+	}
+	return env
+}
+
+func readEnvironmentField(fn protowire.Number, wt protowire.Type, data []byte, env *parsedEnvironment) int {
+	switch fn {
+	case envFieldSteamID:
+		if wt == protowire.BytesType {
+			v, n := protowire.ConsumeString(data)
+			if n >= 0 {
+				env.SteamID = strings.TrimSpace(v)
+				return n
+			}
+		}
+	case envFieldPersonaName:
+		if wt == protowire.BytesType {
+			v, n := protowire.ConsumeString(data)
+			if n >= 0 {
+				env.SteamUsername = strings.TrimSpace(v)
+				return n
+			}
+		}
+	case envFieldMouseVID:
+		if wt == protowire.BytesType {
+			v, n := protowire.ConsumeString(data)
+			if n >= 0 {
+				env.MouseVID = strings.TrimSpace(v)
+				return n
+			}
+		}
+	case envFieldMousePID:
+		if wt == protowire.BytesType {
+			v, n := protowire.ConsumeString(data)
+			if n >= 0 {
+				env.MousePID = strings.TrimSpace(v)
+				return n
+			}
+		}
+	case envFieldTracePoints:
+		if wt == protowire.VarintType {
+			v, n := protowire.ConsumeVarint(data)
+			if n >= 0 {
+				env.TracePoints = int32(v)
+				return n
+			}
+		}
+	}
+	return protowire.ConsumeFieldValue(fn, wt, data)
+}
+
+// ---- Section skip helper ----
+
+func skipSection(r io.Reader) error {
+	var size uint32
+	if err := binary.Read(r, binary.LittleEndian, &size); err != nil {
+		return err
+	}
+	if size == 0 {
+		return nil
+	}
+	_, err := io.CopyN(io.Discard, r, int64(size))
+	return err
+}
+
+// ---- zstd decoder ----
 
 func newPayloadDecoder(r io.Reader, compression uint8) (io.Reader, func(), error) {
 	switch compression {
@@ -441,38 +501,6 @@ func ensureEOF(r io.Reader) error {
 
 func readUint32(r io.Reader) (uint32, error) {
 	var v uint32
-	if err := binary.Read(r, binary.LittleEndian, &v); err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-func readUint8(r io.Reader) (uint8, error) {
-	var v uint8
-	if err := binary.Read(r, binary.LittleEndian, &v); err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-func readInt32(r io.Reader) (int32, error) {
-	var v int32
-	if err := binary.Read(r, binary.LittleEndian, &v); err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-func readInt64(r io.Reader) (int64, error) {
-	var v int64
-	if err := binary.Read(r, binary.LittleEndian, &v); err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-func readFloat64(r io.Reader) (float64, error) {
-	var v float64
 	if err := binary.Read(r, binary.LittleEndian, &v); err != nil {
 		return 0, err
 	}

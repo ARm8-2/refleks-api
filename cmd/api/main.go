@@ -117,9 +117,18 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("init run repository: %w", err)
 		}
+
+		runConfigStore := runs.NewPGConfigStore(databaseClient.Pool())
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := runConfigStore.Seed(seedCtx, runs.DefaultRunSyncSettingsMap()); err != nil {
+			seedCancel()
+			return fmt.Errorf("seed run sync config: %w", err)
+		}
+		seedCancel()
+
 		// Read-only run service: store is not needed for browse/get endpoints.
-		readSvc := runs.NewService(runRepo, nil, "")
-		readHandler := runs.NewHandler(readSvc, runs.HandlerConfig{})
+		readSvc := runs.NewService(runRepo, nil, runConfigStore, "")
+		readHandler := runs.NewHandler(readSvc, runs.HandlerConfig{}, runConfigStore)
 		runRoutes = &httpapi.RunRoutes{
 			RunsList: http.HandlerFunc(readHandler.HandleListRuns),
 			GetRun:   http.HandlerFunc(readHandler.HandleGetRun),
@@ -140,13 +149,13 @@ func run() error {
 				return fmt.Errorf("init r2 store: %w", err)
 			}
 
-			storeSvc := runs.NewService(runRepo, store, cfg.R2KeyPrefix)
+			storeSvc := runs.NewService(runRepo, store, runConfigStore, cfg.R2KeyPrefix)
 			storeHandler := runs.NewHandler(storeSvc, runs.HandlerConfig{
 				MaxSingleFileBytes: cfg.RunSyncMaxFileBytes,
 				MaxBulkFileCount:   cfg.RunSyncMaxBulkFiles,
 				MaxBulkTotalBytes:  cfg.RunSyncMaxBulkBytes,
 				MaxMissingHashes:   cfg.RunSyncMaxMissingHashes,
-			})
+			}, runConfigStore)
 			runRoutes.RawDownload = http.HandlerFunc(storeHandler.HandleDownloadRaw)
 			runRoutes.RawURL = http.HandlerFunc(storeHandler.HandleDownloadRawURL)
 

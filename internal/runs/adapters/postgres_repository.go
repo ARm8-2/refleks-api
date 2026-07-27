@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,7 +67,7 @@ func (r *PostgresRepository) RunDetail(ctx context.Context, hash string) (runs.R
 			s.scenario_name,
 			p.steam_id,
 			p.steam_username,
-			r.epoch_milli,
+			r.played_at,
 			r.uploaded_at,
 			r.size_bytes,
 			r.score,
@@ -107,6 +108,8 @@ func (r *PostgresRepository) RunDetail(ctx context.Context, hash string) (runs.R
 	var avgSpeed sql.NullFloat64
 	var mouseVID sql.NullString
 	var mousePID sql.NullString
+	var playedAt time.Time
+	var uploadedAt time.Time
 
 	if err := rows.Scan(
 		&item.Hash,
@@ -114,8 +117,8 @@ func (r *PostgresRepository) RunDetail(ctx context.Context, hash string) (runs.R
 		&item.ScenarioName,
 		&steamID,
 		&steamUsername,
-		&item.EpochMilli,
-		&item.UploadedAt,
+		&playedAt,
+		&uploadedAt,
 		&item.SizeBytes,
 		&score,
 		&accuracy,
@@ -129,6 +132,9 @@ func (r *PostgresRepository) RunDetail(ctx context.Context, hash string) (runs.R
 	); err != nil {
 		return runs.RunListItem{}, err
 	}
+
+	item.PlayedAt = playedAt.UnixMilli()
+	item.UploadedAt = uploadedAt.UnixMilli()
 
 	if steamID.Valid {
 		item.SteamID = steamID.String
@@ -212,11 +218,21 @@ func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListReque
 	if req.MaxAccuracy != nil {
 		addArgClause("r.accuracy <= $%d", *req.MaxAccuracy)
 	}
-	if req.FromEpoch != nil {
-		addArgClause("r.epoch_milli >= $%d", *req.FromEpoch)
+	if req.FromPlayedAt != nil {
+		t := time.UnixMilli(*req.FromPlayedAt)
+		addArgClause("r.played_at >= $%d", t)
 	}
-	if req.ToEpoch != nil {
-		addArgClause("r.epoch_milli <= $%d", *req.ToEpoch)
+	if req.ToPlayedAt != nil {
+		t := time.UnixMilli(*req.ToPlayedAt)
+		addArgClause("r.played_at <= $%d", t)
+	}
+	if req.FromUploaded != nil {
+		t := time.UnixMilli(*req.FromUploaded)
+		addArgClause("r.uploaded_at >= $%d", t)
+	}
+	if req.ToUploaded != nil {
+		t := time.UnixMilli(*req.ToUploaded)
+		addArgClause("r.uploaded_at <= $%d", t)
 	}
 
 	where := ""
@@ -237,7 +253,7 @@ func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListReque
 			s.scenario_name,
 			p.steam_id,
 			p.steam_username,
-			r.epoch_milli,
+			r.played_at,
 			r.uploaded_at,
 			r.size_bytes,
 			r.score,
@@ -276,6 +292,8 @@ func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListReque
 		var avgSpeed sql.NullFloat64
 		var mouseVID sql.NullString
 		var mousePID sql.NullString
+		var playedAt time.Time
+		var uploadedAt time.Time
 
 		if err := rows.Scan(
 			&item.Hash,
@@ -283,8 +301,8 @@ func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListReque
 			&item.ScenarioName,
 			&steamID,
 			&steamUsername,
-			&item.EpochMilli,
-			&item.UploadedAt,
+			&playedAt,
+			&uploadedAt,
 			&item.SizeBytes,
 			&score,
 			&accuracy,
@@ -298,6 +316,9 @@ func (r *PostgresRepository) ListRuns(ctx context.Context, req runs.RunListReque
 		); err != nil {
 			return nil, err
 		}
+
+		item.PlayedAt = playedAt.UnixMilli()
+		item.UploadedAt = uploadedAt.UnixMilli()
 
 		if steamID.Valid {
 			item.SteamID = steamID.String
@@ -350,7 +371,7 @@ func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 			scenario_id,
 			hash,
 			file_name,
-			epoch_milli,
+			played_at,
 			size_bytes,
 			object_key,
 			format_version,
@@ -375,9 +396,9 @@ func (r *PostgresRepository) InsertRun(ctx context.Context, meta runs.RunMetadat
 		scenarioID,
 		meta.Hash,
 		meta.FileName,
-		meta.EpochMilli,
+		meta.PlayedAt,
 		meta.SizeBytes,
-		meta.ObjectKey,
+		nullIfEmpty(meta.ObjectKey),
 		meta.FormatVersion,
 		meta.Score,
 		meta.Accuracy,
@@ -471,10 +492,10 @@ func runsOrderBySQL(sort runs.RunsSort) string {
 	switch sort {
 	case runs.RunsSortUploadedAtAsc:
 		return "r.uploaded_at ASC, r.id ASC"
-	case runs.RunsSortEpochDesc:
-		return "r.epoch_milli DESC, r.id DESC"
-	case runs.RunsSortEpochAsc:
-		return "r.epoch_milli ASC, r.id ASC"
+	case runs.RunsSortPlayedAtDesc:
+		return "r.played_at DESC, r.id DESC"
+	case runs.RunsSortPlayedAtAsc:
+		return "r.played_at ASC, r.id ASC"
 	case runs.RunsSortScoreDesc:
 		return "r.score DESC NULLS LAST, r.id DESC"
 	case runs.RunsSortScoreAsc:

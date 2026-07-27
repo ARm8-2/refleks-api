@@ -20,11 +20,11 @@ type BenchmarkDifficultyRequest struct {
 
 // ScenarioEntry models one ranked scenario leaderboard row.
 type ScenarioEntry struct {
-	Rank           int     `json:"rank"`
-	BestScore      float64 `json:"best_score"`
-	BestEpochMilli *int64  `json:"best_epoch_milli,omitempty"`
-	SteamID        string  `json:"steam_id"`
-	SteamUsername  string  `json:"steam_username,omitempty"`
+	Rank          int     `json:"rank"`
+	BestScore     float64 `json:"best_score"`
+	BestPlayedAt  *int64  `json:"best_played_at,omitempty"`
+	SteamID       string  `json:"steam_id"`
+	SteamUsername string  `json:"steam_username,omitempty"`
 }
 
 // ScenarioLeaderboardResponse is the API payload for one scenario leaderboard page.
@@ -45,7 +45,7 @@ type BenchmarkDifficultyEntry struct {
 	Rank             int     `json:"rank"`
 	CompositeScore   float64 `json:"composite_score"`
 	MatchedScenarios int     `json:"matched_scenarios"`
-	LastEpochMilli   *int64  `json:"last_epoch_milli,omitempty"`
+	LastPlayedAt     *int64  `json:"last_played_at,omitempty"`
 	SteamID          string  `json:"steam_id"`
 	SteamUsername    string  `json:"steam_username,omitempty"`
 }

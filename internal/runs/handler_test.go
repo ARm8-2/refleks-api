@@ -13,7 +13,7 @@ import (
 func TestHandlerHandleSync_OctetStream(t *testing.T) {
 	t.Parallel()
 
-	h := NewHandler(NewService(newMemRepo(), newMemStore(), "runs"), DefaultHandlerConfig())
+	h := NewHandler(NewService(newMemRepo(), newMemStore(), nil, "runs"), DefaultHandlerConfig(), nil)
 	raw := buildTestRefleksFile(t, "single.refleks", 1742640000000)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/runs/sync", bytes.NewReader(raw))
@@ -41,8 +41,8 @@ func TestHandlerHandleSync_OctetStream(t *testing.T) {
 func TestHandlerHandleMissingHashes(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
-	h := NewHandler(svc, DefaultHandlerConfig())
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
+	h := NewHandler(svc, DefaultHandlerConfig(), nil)
 
 	raw := buildTestRefleksFile(t, "existing.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)
@@ -80,8 +80,8 @@ func TestHandlerHandleMissingHashes(t *testing.T) {
 func TestHandlerHandleDownloadRaw(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
-	h := NewHandler(svc, DefaultHandlerConfig())
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
+	h := NewHandler(svc, DefaultHandlerConfig(), nil)
 
 	raw := buildTestRefleksFile(t, "download.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)
@@ -117,8 +117,8 @@ func TestHandlerHandleDownloadRaw(t *testing.T) {
 func TestHandlerHandleDownloadRawURL(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(newMemRepo(), newMemStore(), "runs")
-	h := NewHandler(svc, DefaultHandlerConfig())
+	svc := NewService(newMemRepo(), newMemStore(), nil, "runs")
+	h := NewHandler(svc, DefaultHandlerConfig(), nil)
 
 	raw := buildTestRefleksFile(t, "download-url.refleks", 1742640000000)
 	synced, err := svc.SyncOne(context.Background(), raw)

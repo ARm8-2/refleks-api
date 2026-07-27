@@ -21,10 +21,11 @@ const (
 
 // Service orchestrates metadata persistence and blob storage for run sync.
 type Service struct {
-	repo      Repository
-	store     ObjectStore
-	keyPrefix string
-	now       func() time.Time
+	repo        Repository
+	store       ObjectStore
+	configStore ConfigStore
+	keyPrefix   string
+	now         func() time.Time
 }
 
 // RawDownload contains a streamed object payload for a synced .refleks file.
@@ -46,15 +47,16 @@ type RawDownloadLink struct {
 }
 
 // NewService constructs the run sync service.
-func NewService(repo Repository, store ObjectStore, keyPrefix string) *Service {
+func NewService(repo Repository, store ObjectStore, configStore ConfigStore, keyPrefix string) *Service {
 	prefix := strings.TrimSpace(keyPrefix)
 	prefix = strings.Trim(prefix, "/")
 
 	return &Service{
-		repo:      repo,
-		store:     store,
-		keyPrefix: prefix,
-		now:       time.Now,
+		repo:        repo,
+		store:       store,
+		configStore: configStore,
+		keyPrefix:   prefix,
+		now:         time.Now,
 	}
 }
 
@@ -77,13 +79,22 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		return SyncResult{}, fmt.Errorf("query existing hash: %w", err)
 	}
 	if _, ok := existing[hash]; ok {
-		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
+		return duplicateSyncResult(hash, parsedFileName, parsed.PlayedAt, sizeBytes), nil
 	}
 
-	uploadedAt := s.now().UTC()
-	objectKey := buildObjectKey(s.keyPrefix, parsed.EpochMilli, hash, uploadedAt)
-	if err := s.store.Put(ctx, objectKey, raw); err != nil {
-		return SyncResult{}, fmt.Errorf("store object: %w", err)
+	now := s.now().UTC()
+	playedAt := time.UnixMilli(parsed.PlayedAt).UTC()
+
+	var objectKey string
+	storeInR2, storeErr := s.shouldStoreInR2(ctx, parsed)
+	if storeErr != nil {
+		return SyncResult{}, fmt.Errorf("check r2 storage policy: %w", storeErr)
+	}
+	if storeInR2 && s.store != nil {
+		objectKey = buildObjectKey(s.keyPrefix, playedAt, hash)
+		if err := s.store.Put(ctx, objectKey, raw); err != nil {
+			return SyncResult{}, fmt.Errorf("store object: %w", err)
+		}
 	}
 
 	meta := RunMetadata{
@@ -92,10 +103,10 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		ScenarioName:  strings.TrimSpace(parsed.ScenarioName),
 		SteamID:       strings.TrimSpace(parsed.SteamID),
 		SteamUsername: strings.TrimSpace(parsed.SteamUsername),
-		EpochMilli:    parsed.EpochMilli,
+		PlayedAt:      playedAt,
 		SizeBytes:     sizeBytes,
 		ObjectKey:     objectKey,
-		UploadedAt:    uploadedAt,
+		UploadedAt:    now,
 		FormatVersion: parsed.FormatVersion,
 		Score:         parsed.Score,
 		Accuracy:      parsed.Accuracy,
@@ -110,13 +121,17 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 
 	inserted, err := s.repo.InsertRun(ctx, meta)
 	if err != nil {
-		_ = s.store.Delete(ctx, objectKey)
+		if objectKey != "" && s.store != nil {
+			_ = s.store.Delete(ctx, objectKey)
+		}
 		return SyncResult{}, fmt.Errorf("persist metadata: %w", err)
 	}
 
 	if !inserted {
-		_ = s.store.Delete(ctx, objectKey)
-		return duplicateSyncResult(hash, parsedFileName, parsed.EpochMilli, sizeBytes), nil
+		if objectKey != "" && s.store != nil {
+			_ = s.store.Delete(ctx, objectKey)
+		}
+		return duplicateSyncResult(hash, parsedFileName, parsed.PlayedAt, sizeBytes), nil
 	}
 
 	return SyncResult{
@@ -124,18 +139,43 @@ func (s *Service) SyncOne(ctx context.Context, raw []byte) (SyncResult, error) {
 		AlreadyPresent: false,
 		Stored:         true,
 		FileName:       parsedFileName,
-		EpochMilli:     parsed.EpochMilli,
+		PlayedAt:       parsed.PlayedAt,
 		SizeBytes:      sizeBytes,
 	}, nil
 }
 
-func duplicateSyncResult(hash, fileName string, epochMilli, sizeBytes int64) SyncResult {
+// shouldStoreInR2 checks the current run sync settings to decide whether the
+// raw .refleks payload should be uploaded to object storage.
+func (s *Service) shouldStoreInR2(ctx context.Context, parsed ParsedRefleksFile) (bool, error) {
+	if s.configStore == nil {
+		return s.store != nil, nil
+	}
+
+	settings, err := s.configStore.Load(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	if !settings.StoreRunsEnabled {
+		return false, nil
+	}
+	if settings.StoreAnonOnly && strings.TrimSpace(parsed.SteamID) == "" {
+		return false, nil
+	}
+	if settings.StoreWithMouseTraceOnly && !parsed.HasMouseTrace {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func duplicateSyncResult(hash, fileName string, playedAt, sizeBytes int64) SyncResult {
 	return SyncResult{
 		Hash:           hash,
 		AlreadyPresent: true,
 		Stored:         false,
 		FileName:       fileName,
-		EpochMilli:     epochMilli,
+		PlayedAt:       playedAt,
 		SizeBytes:      sizeBytes,
 	}
 }
@@ -179,6 +219,9 @@ func (s *Service) DownloadRaw(ctx context.Context, hash string) (RawDownload, er
 	if err != nil {
 		return RawDownload{}, err
 	}
+	if run.ObjectKey == "" {
+		return RawDownload{}, ErrObjectNotFound
+	}
 	body, size, err := s.store.Get(ctx, run.ObjectKey)
 	if err != nil {
 		return RawDownload{}, err
@@ -209,6 +252,9 @@ func (s *Service) DownloadRawURL(ctx context.Context, hash string) (RawDownloadL
 	run, err := s.repo.RunByHash(ctx, normalized)
 	if err != nil {
 		return RawDownloadLink{}, err
+	}
+	if run.ObjectKey == "" {
+		return RawDownloadLink{}, ErrObjectNotFound
 	}
 
 	fileName := strings.TrimSpace(run.FileName)
@@ -325,7 +371,7 @@ func normalizeRunListRequest(req RunListRequest) RunListRequest {
 
 	switch out.Sort {
 	case RunsSortUploadedAtAsc, RunsSortUploadedAtDesc,
-		RunsSortEpochAsc, RunsSortEpochDesc,
+		RunsSortPlayedAtAsc, RunsSortPlayedAtDesc,
 		RunsSortScoreAsc, RunsSortScoreDesc,
 		RunsSortAccuracyAsc, RunsSortAccuracyDesc,
 		RunsSortAvgTTKAsc, RunsSortAvgTTKDesc:
@@ -339,20 +385,19 @@ func normalizeRunListRequest(req RunListRequest) RunListRequest {
 	if out.MinAccuracy != nil && out.MaxAccuracy != nil && *out.MinAccuracy > *out.MaxAccuracy {
 		out.MinAccuracy, out.MaxAccuracy = out.MaxAccuracy, out.MinAccuracy
 	}
-	if out.FromEpoch != nil && out.ToEpoch != nil && *out.FromEpoch > *out.ToEpoch {
-		out.FromEpoch, out.ToEpoch = out.ToEpoch, out.FromEpoch
+	if out.FromPlayedAt != nil && out.ToPlayedAt != nil && *out.FromPlayedAt > *out.ToPlayedAt {
+		out.FromPlayedAt, out.ToPlayedAt = out.ToPlayedAt, out.FromPlayedAt
+	}
+	if out.FromUploaded != nil && out.ToUploaded != nil && *out.FromUploaded > *out.ToUploaded {
+		out.FromUploaded, out.ToUploaded = out.ToUploaded, out.FromUploaded
 	}
 
 	return out
 }
 
-func buildObjectKey(prefix string, epochMilli int64, hash string, fallback time.Time) string {
+func buildObjectKey(prefix string, playedAt time.Time, hash string) string {
 	name := hash + RunFileExtension
-	day := fallback.UTC()
-	if epochMilli > 0 {
-		day = time.UnixMilli(epochMilli).UTC()
-	}
-	datePath := day.Format("2006/01/02")
+	datePath := playedAt.Format("2006/01/02")
 	if prefix == "" {
 		return datePath + "/" + name
 	}
