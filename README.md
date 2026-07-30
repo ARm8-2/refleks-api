@@ -35,7 +35,8 @@ This repository now includes:
 │   │   ├── service.go
 │   │   └── types.go
 │   ├── config/
-│   │   └── config.go
+│   │   ├── config.go
+│   │   └── env.go
 │   ├── httpapi/
 │   │   ├── middleware.go
 │   │   └── router.go
@@ -73,13 +74,17 @@ This repository now includes:
 │   │   └── types.go
 │   ├── postgres/
 │   │   └── client.go
+│   ├── stats/
+│   │   ├── adapters/
+│   │   │   └── postgres_repository.go
+│   │   ├── contracts.go
+│   │   ├── handler.go
+│   │   ├── service.go
+│   │   └── types.go
 │   └── status/
 │       ├── handler.go
 │       ├── handler_test.go
 │       └── service.go
-├── testdata/
-│   ├── client-reference/
-│   └── refleks-samples/
 ├── go.mod
 └── README.md
 ```
@@ -352,22 +357,22 @@ Response:
 
 ```json
 {
-	"scenario_id": 42,
-	"scenario_name": "VT 1w3ts Intermediate S5",
-	"entries": [
-		{
-			"rank": 1,
-			"best_score": 1562.4,
-			"best_epoch_milli": 1762190000000,
-			"steam_id": "76561198000000000",
-			"steam_username": "alice"
-		}
-	],
-	"limit": 100,
-	"offset": 0,
-	"count": 1,
-	"has_more": false,
-	"refreshed_at": "2026-04-04T14:28:00Z"
+    "scenario_id": 42,
+    "scenario_name": "VT 1w3ts Intermediate S5",
+    "entries": [
+        {
+            "rank": 1,
+            "best_score": 1562.4,
+            "best_played_at": 1762190000000,
+            "steam_id": "76561198000000000",
+            "steam_username": "alice"
+        }
+    ],
+    "limit": 100,
+    "offset": 0,
+    "count": 1,
+    "has_more": false,
+    "refreshed_at": "2026-04-04T14:28:00Z"
 }
 ```
 
@@ -385,25 +390,25 @@ Response:
 
 ```json
 {
-	"difficulty_id": 10,
-	"kovaaks_benchmark_id": 12345,
-	"benchmark_name": "Voltaic Intermediate S5",
-	"difficulty_name": "Intermediate",
-	"entries": [
-		{
-			"rank": 1,
-			"composite_score": 8654.2,
-			"matched_scenarios": 18,
-			"last_epoch_milli": 1762190000000,
-			"steam_id": "76561198000000000",
-			"steam_username": "alice"
-		}
-	],
-	"limit": 100,
-	"offset": 0,
-	"count": 1,
-	"has_more": false,
-	"refreshed_at": "2026-04-04T14:28:00Z"
+    "difficulty_id": 10,
+    "kovaaks_benchmark_id": 12345,
+    "benchmark_name": "Voltaic Intermediate S5",
+    "difficulty_name": "Intermediate",
+    "entries": [
+        {
+            "rank": 1,
+            "composite_score": 8654.2,
+            "matched_scenarios": 18,
+            "last_played_at": 1762190000000,
+            "steam_id": "76561198000000000",
+            "steam_username": "alice"
+        }
+    ],
+    "limit": 100,
+    "offset": 0,
+    "count": 1,
+    "has_more": false,
+    "refreshed_at": "2026-04-04T14:28:00Z"
 }
 ```
 
@@ -432,12 +437,12 @@ Response:
 
 ```json
 {
-	"hash": "<sha256>",
-	"already_present": false,
-	"stored": true,
-	"file_name": "air far long strafes %70 - Challenge - 2024.12.22-19.47.47 Stats.refleks",
-	"epoch_milli": 1734896867000,
-	"size_bytes": 123456
+    "hash": "<sha256>",
+    "already_present": false,
+    "stored": true,
+    "file_name": "air far long strafes %70 - Challenge - 2024.12.22-19.47.47 Stats.refleks",
+    "played_at": 1734896867000,
+    "size_bytes": 123456
 }
 ```
 
@@ -504,7 +509,7 @@ Supported query params:
 - `limit` and `offset` for pagination
 - `sort` — ordering; supported values:
   - `uploaded_at_desc` (default), `uploaded_at_asc`
-  - `epoch_desc`, `epoch_asc`
+  - `played_at_desc`, `played_at_asc`
   - `score_desc`, `score_asc`
   - `accuracy_desc`, `accuracy_asc`
   - `avg_ttk_desc`, `avg_ttk_asc`
@@ -516,36 +521,37 @@ Supported query params:
 - `has_mouse_trace` — `true` or `false`
 - `min_score`, `max_score` — inclusive score range
 - `min_accuracy`, `max_accuracy` — inclusive accuracy range (0–1)
-- `from_epoch`, `to_epoch` — run timestamp bounds in milliseconds
+- `from_played_at`, `to_played_at` — run played-at timestamp bounds in milliseconds
+- `from_uploaded`, `to_uploaded` — run uploaded-at timestamp bounds in milliseconds
 
 Response:
 
 ```json
 {
-	"runs": [
-		{
-			"hash": "<sha256>",
-			"file_name": "air far long strafes %70 - Challenge - 2024.12.22-19.47.47 Stats.refleks",
-			"scenario_name": "air far long strafes %70",
-			"steam_username": "alice",
-			"epoch_milli": 1734896867000,
-			"uploaded_at": "2026-03-25T11:00:00Z",
-			"size_bytes": 123456,
-			"score": 1162.9,
-			"accuracy": 0.925,
-			"avg_ttk_seconds": 0.495745,
-			"duration_seconds": 42.08,
-			"sens_cm360": 36.48,
-			"has_mouse_trace": true,
-			"avg_mouse_speed": 1284.2,
-			"mouse_vid": "046D",
-			"mouse_pid": "C539"
-		}
-	],
-	"limit": 25,
-	"offset": 0,
-	"count": 1,
-	"has_more": false
+    "runs": [
+        {
+            "hash": "<sha256>",
+            "file_name": "air far long strafes %70 - Challenge - 2024.12.22-19.47.47 Stats.refleks",
+            "scenario_name": "air far long strafes %70",
+            "steam_username": "alice",
+            "played_at": 1734896867000,
+            "uploaded_at": 1742900400000,
+            "size_bytes": 123456,
+            "score": 1162.9,
+            "accuracy": 0.925,
+            "avg_ttk_seconds": 0.495745,
+            "duration_seconds": 42.08,
+            "sens_cm360": 36.48,
+            "has_mouse_trace": true,
+            "avg_mouse_speed": 1284.2,
+            "mouse_vid": "046D",
+            "mouse_pid": "C539"
+        }
+    ],
+    "limit": 25,
+    "offset": 0,
+    "count": 1,
+    "has_more": false
 }
 ```
 
@@ -563,23 +569,23 @@ Response:
 
 ```json
 {
-	"hash": "<sha256>",
-	"file_name": "air far long strafes %70 - Challenge - 2024.12.22-19.47.47 Stats.refleks",
-	"scenario_name": "air far long strafes %70",
-	"steam_id": "76561198000000000",
-	"steam_username": "alice",
-	"epoch_milli": 1734896867000,
-	"uploaded_at": "2026-03-25T11:00:00Z",
-	"size_bytes": 123456,
-	"score": 1162.9,
-	"accuracy": 0.925,
-	"avg_ttk_seconds": 0.495745,
-	"duration_seconds": 42.08,
-	"sens_cm360": 36.48,
-	"has_mouse_trace": true,
-	"avg_mouse_speed": 1284.2,
-	"mouse_vid": "046D",
-	"mouse_pid": "C539"
+    "hash": "<sha256>",
+    "file_name": "air far long strafes %70 - Challenge - 2024.12.22-19.47.47 Stats.refleks",
+    "scenario_name": "air far long strafes %70",
+    "steam_id": "76561198000000000",
+    "steam_username": "alice",
+    "played_at": 1734896867000,
+    "uploaded_at": 1742900400000,
+    "size_bytes": 123456,
+    "score": 1162.9,
+    "accuracy": 0.925,
+    "avg_ttk_seconds": 0.495745,
+    "duration_seconds": 42.08,
+    "sens_cm360": 36.48,
+    "has_mouse_trace": true,
+    "avg_mouse_speed": 1284.2,
+    "mouse_vid": "046D",
+    "mouse_pid": "C539"
 }
 ```
 
@@ -787,7 +793,7 @@ Environment variables:
 - `APP_ENV` (default: `development`)
 - `APP_VERSION` (default: build-time version or `dev`)
 - `APP_PORT` (default: `8080`)
-- `LOG_LEVEL` (one of: `debug`, `info`, `warn`, `error`)
+- `LOG_LEVEL` (one of: `debug`, `info`, `warn`, `warning`, `error`)
 - `HTTP_READ_TIMEOUT` (default: `15s`)
 - `HTTP_WRITE_TIMEOUT` (default: `15s`)
 - `HTTP_IDLE_TIMEOUT` (default: `60s`)
