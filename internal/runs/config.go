@@ -12,7 +12,7 @@ import (
 type RunSyncSettings struct {
 	SyncEnabled             bool
 	StoreRunsEnabled        bool
-	StoreAnonOnly           bool
+	StoreNonAnonOnly        bool
 	StoreWithMouseTraceOnly bool
 }
 
@@ -21,7 +21,7 @@ func DefaultRunSyncSettings() RunSyncSettings {
 	return RunSyncSettings{
 		SyncEnabled:             true,
 		StoreRunsEnabled:        true,
-		StoreAnonOnly:           false,
+		StoreNonAnonOnly:        false,
 		StoreWithMouseTraceOnly: false,
 	}
 }
@@ -62,8 +62,8 @@ func (s *PGConfigStore) Load(ctx context.Context) (RunSyncSettings, error) {
 			out.SyncEnabled = value
 		case "store_runs_enabled":
 			out.StoreRunsEnabled = value
-		case "store_anon_only":
-			out.StoreAnonOnly = value
+		case "store_non_anon_only":
+			out.StoreNonAnonOnly = value
 		case "store_with_mouse_trace_only":
 			out.StoreWithMouseTraceOnly = value
 		}

@@ -159,7 +159,7 @@ func (s *Service) shouldStoreInR2(ctx context.Context, parsed ParsedRefleksFile)
 	if !settings.StoreRunsEnabled {
 		return false, nil
 	}
-	if settings.StoreAnonOnly && strings.TrimSpace(parsed.SteamID) == "" {
+	if settings.StoreNonAnonOnly && strings.TrimSpace(parsed.SteamID) == "" {
 		return false, nil
 	}
 	if settings.StoreWithMouseTraceOnly && !parsed.HasMouseTrace {
